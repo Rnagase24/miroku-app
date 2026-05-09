@@ -185,7 +185,7 @@ function saveData() {
   renderAll();
   churchDoc.set(appData).catch(err => {
     console.error('Save error:', err);
-    showToast('⚠️ Changes not saved — your Firebase rules are blocking writes. See instructions.', 'error');
+    showToast('⚠️ Save failed [' + (err.code || err.message || 'unknown') + '] — tap for help', 'error');
   });
 }
 
