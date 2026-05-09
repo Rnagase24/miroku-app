@@ -221,6 +221,11 @@ function showApp(visible) {
     document.body.classList.toggle('is-admin', isAdmin());
     subscribeData();
     initSettings();
+    const schedBtn = document.getElementById('schedule-word-btn');
+    if (schedBtn) {
+      schedBtn.replaceWith(schedBtn.cloneNode(true));
+      document.getElementById('schedule-word-btn').addEventListener('click', openScheduleModal);
+    }
   } else {
     document.body.classList.remove('is-admin');
     document.getElementById('login-username').value = '';
@@ -280,8 +285,6 @@ function renderDailyMessage() {
       ${m.scripture ? `<p class="daily-word-scripture">— ${esc(m.scripture)}</p>` : ''}
     </div>`;
 }
-
-document.getElementById('schedule-word-btn').addEventListener('click', openScheduleModal);
 
 function openScheduleModal() {
   const today = getTodayString();
