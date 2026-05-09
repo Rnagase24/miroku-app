@@ -62,6 +62,10 @@ function logout() {
   currentUser = null;
   localStorage.removeItem(SESSION_KEY);
   unsubscribeData();
+  // Tell the browser not to silently re-login after an explicit sign out
+  if ('credentials' in navigator) {
+    navigator.credentials.preventSilentAccess().catch(() => {});
+  }
   showApp(false);
 }
 
@@ -165,8 +169,29 @@ function showLoading(on) {
   el.style.opacity = on ? '1' : '0';
 }
 
+// ── Credential Management (Face ID / saved passwords) ──
+async function storeCredential(username, password) {
+  if (!window.PasswordCredential) return;
+  try {
+    const cred = new PasswordCredential({ id: username, password, name: username });
+    await navigator.credentials.store(cred);
+  } catch {}
+}
+
+async function tryAutoLogin() {
+  // Already have a valid session — go straight in
+  if (checkSession()) { showApp(true); return; }
+
+  // Try to silently retrieve a saved credential (triggers Face ID on iOS)
+  if (!('credentials' in navigator) || !window.PasswordCredential) return;
+  try {
+    const cred = await navigator.credentials.get({ password: true, mediation: 'silent' });
+    if (cred && login(cred.id, cred.password)) showApp(true);
+  } catch {}
+}
+
 // ── Login ──
-document.getElementById('login-form').addEventListener('submit', e => {
+document.getElementById('login-form').addEventListener('submit', async e => {
   e.preventDefault();
   const username = document.getElementById('login-username').value;
   const password = document.getElementById('login-password').value;
@@ -174,6 +199,7 @@ document.getElementById('login-form').addEventListener('submit', e => {
   if (login(username, password)) {
     errEl.textContent = '';
     document.getElementById('login-password').value = '';
+    await storeCredential(username, password); // offer to save / Face ID
     showApp(true);
   } else {
     errEl.textContent = 'Incorrect username or password.';
@@ -783,4 +809,4 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 });
 
 // ── Init ──
-if (checkSession()) showApp(true);
+tryAutoLogin();
