@@ -11,8 +11,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-
 const churchDoc = db.collection('church').doc('data');
 
 // ── Auth ──
@@ -113,20 +111,22 @@ let appData = null;
 let dataUnsubscribe = null;
 
 function subscribeData() {
+  // Show default data immediately so the app is never blank
+  appData = deepCopy(DEFAULT_DATA);
+  renderAll();
+
   showLoading(true);
   dataUnsubscribe = churchDoc.onSnapshot(snap => {
     if (snap.exists()) {
       appData = snap.data();
     } else {
-      appData = deepCopy(DEFAULT_DATA);
-      churchDoc.set(appData);
+      // First run: write defaults to Firestore
+      churchDoc.set(appData).catch(err => console.error('Init error:', err));
     }
     renderAll();
     showLoading(false);
   }, err => {
     console.error('Firestore error:', err);
-    appData = deepCopy(DEFAULT_DATA);
-    renderAll();
     showLoading(false);
   });
 }
