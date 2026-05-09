@@ -10,7 +10,8 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const churchDoc = db.collection('church').doc('data');
+const churchDoc  = db.collection('church').doc('data');
+const settingsDoc = db.collection('church').doc('settings');
 
 // ── Auth ──
 const SESSION_KEY = 'miroku-session';
@@ -618,24 +619,36 @@ function deleteMedia(id) {
 
 // ── SETTINGS ──
 function initSettings() {
-  const users = getUsers();
-  const user  = users[currentUser.username] || {};
+  // Load persisted settings from Firestore
+  settingsDoc.get().then(snap => {
+    const data = snap.exists() ? snap.data() : {};
+    const userSettings = (data[currentUser.username]) || {};
 
-  // Load display name
-  const nameInput = document.getElementById('settings-display-name');
-  if (nameInput) nameInput.value = user.displayName || currentUser.displayName || '';
+    const nameInput = document.getElementById('settings-display-name');
+    if (nameInput) nameInput.value = userSettings.displayName || currentUser.displayName || '';
 
-  // Load notification prefs
-  const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
-  ['events', 'services', 'live', 'classes'].forEach(key => {
-    const el = document.getElementById('notif-' + key);
-    if (el) el.checked = !!(prefs[key]);
+    const prefs = userSettings.notifPrefs || {};
+    ['events', 'services', 'live', 'classes'].forEach(key => {
+      const el = document.getElementById('notif-' + key);
+      if (el) el.checked = !!(prefs[key]);
+    });
+  }).catch(() => {
+    // Fall back to localStorage if Firestore unavailable
+    const users = getUsers();
+    const user  = users[currentUser.username] || {};
+    const nameInput = document.getElementById('settings-display-name');
+    if (nameInput) nameInput.value = user.displayName || '';
+    const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
+    ['events', 'services', 'live', 'classes'].forEach(key => {
+      const el = document.getElementById('notif-' + key);
+      if (el) el.checked = !!(prefs[key]);
+    });
   });
 
   // Save profile button
   const saveBtn = document.getElementById('settings-save-btn');
   if (saveBtn) {
-    saveBtn.replaceWith(saveBtn.cloneNode(true)); // remove old listeners
+    saveBtn.replaceWith(saveBtn.cloneNode(true));
     document.getElementById('settings-save-btn').addEventListener('click', saveProfile);
   }
 
@@ -644,10 +657,27 @@ function initSettings() {
     const el = document.getElementById('notif-' + key);
     if (!el) return;
     el.replaceWith(el.cloneNode(true));
-    document.getElementById('notif-' + key).checked = !!(prefs[key]);
     document.getElementById('notif-' + key).addEventListener('change', e => {
       handleNotifToggle(key, e.target.checked);
     });
+  });
+}
+
+function saveUserSettings(patch) {
+  settingsDoc.get().then(snap => {
+    const data = snap.exists() ? snap.data() : {};
+    data[currentUser.username] = Object.assign(data[currentUser.username] || {}, patch);
+    settingsDoc.set(data);
+  }).catch(() => {
+    // localStorage fallback
+    if (patch.displayName) {
+      const users = getUsers();
+      if (users[currentUser.username]) {
+        users[currentUser.username].displayName = patch.displayName;
+        saveUsers(users);
+      }
+    }
+    if (patch.notifPrefs) localStorage.setItem(NOTIF_KEY, JSON.stringify(patch.notifPrefs));
   });
 }
 
@@ -686,6 +716,8 @@ function saveProfile() {
   currentUser.displayName = displayName;
   localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
 
+  saveUserSettings({ displayName });
+
   document.getElementById('settings-current-pw').value = '';
   document.getElementById('settings-new-pw').value     = '';
   document.getElementById('settings-confirm-pw').value = '';
@@ -696,11 +728,8 @@ function saveProfile() {
 }
 
 async function handleNotifToggle(key, enabled) {
-  const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
-
   if (!enabled) {
-    prefs[key] = false;
-    localStorage.setItem(NOTIF_KEY, JSON.stringify(prefs));
+    updateNotifPref(key, false);
     return;
   }
 
@@ -711,13 +740,27 @@ async function handleNotifToggle(key, enabled) {
   }
 
   const permission = await Notification.requestPermission();
-  prefs[key] = permission === 'granted';
-  localStorage.setItem(NOTIF_KEY, JSON.stringify(prefs));
-
-  if (permission !== 'granted') {
+  if (permission === 'granted') {
+    updateNotifPref(key, true);
+  } else {
     document.getElementById('notif-' + key).checked = false;
     alert('Please enable notifications in your device settings for this app.');
   }
+}
+
+function updateNotifPref(key, value) {
+  settingsDoc.get().then(snap => {
+    const data = snap.exists() ? snap.data() : {};
+    const userSettings = data[currentUser.username] || {};
+    userSettings.notifPrefs = userSettings.notifPrefs || {};
+    userSettings.notifPrefs[key] = value;
+    data[currentUser.username] = userSettings;
+    settingsDoc.set(data);
+  }).catch(() => {
+    const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
+    prefs[key] = value;
+    localStorage.setItem(NOTIF_KEY, JSON.stringify(prefs));
+  });
 }
 
 // ── Modal system ──
