@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <clipPath id="outerClip">
+      <circle cx="50" cy="50" r="46.5"/>
+    </clipPath>
+  </defs>
+
+  <!-- Gold/amber outer ring -->
+  <circle cx="50" cy="50" r="50" fill="#e2a83a"/>
+  <circle cx="50" cy="50" r="47.5" fill="#d4a843"/>
+
+  <!-- White field -->
+  <circle cx="50" cy="50" r="46.5" fill="#ffffff"/>
+
+  <!-- All content clipped to white circle -->
+  <g clip-path="url(#outerClip)">
+    <!-- Bold green cross arms -->
+    <rect x="37" y="3.5" width="26" height="93" fill="#009b50"/>
+    <rect x="3.5" y="37" width="93" height="26" fill="#009b50"/>
+
+    <!-- Gold diagonal spokes in the four white quadrants -->
+    <line x1="63" y1="37" x2="84" y2="16" stroke="#d4a843" stroke-width="5" stroke-linecap="round"/>
+    <line x1="63" y1="63" x2="84" y2="84" stroke="#d4a843" stroke-width="5" stroke-linecap="round"/>
+    <line x1="37" y1="63" x2="16" y2="84" stroke="#d4a843" stroke-width="5" stroke-linecap="round"/>
+    <line x1="37" y1="37" x2="16" y2="16" stroke="#d4a843" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Gold hub ring (drawn over cross and spokes) -->
+  <circle cx="50" cy="50" r="22.5" fill="#d4a843"/>
+  <!-- Rose-red center circle -->
+  <circle cx="50" cy="50" r="19" fill="#c75550"/>
+  <!-- Gold inner circle -->
+  <circle cx="50" cy="50" r="12" fill="#e2a83a"/>
+</svg>

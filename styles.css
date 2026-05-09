@@ -48,10 +48,14 @@ html, body {
 }
 
 .login-logo {
-  font-size: 52px;
-  color: var(--purple);
   margin-bottom: 12px;
   line-height: 1;
+}
+
+.login-logo img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
 }
 
 .login-church-name {
@@ -132,10 +136,16 @@ html, body {
 .header-text { min-width: 0; }
 
 .header-logo {
-  font-size: 28px;
   line-height: 1;
-  color: var(--gold);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.header-logo img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 .header-title {
@@ -813,3 +823,95 @@ body.is-admin .card-actions { display: flex; }
 
 .toggle-switch input:checked + .toggle-slider { background: var(--purple); }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+/* ── Daily Word card ── */
+.daily-word-card {
+  background: linear-gradient(135deg, #fffbf0 0%, #fdf3d0 100%);
+  border-radius: var(--radius);
+  padding: 20px 18px 18px;
+  border-left: 4px solid var(--gold);
+  box-shadow: 0 2px 8px rgba(212,168,67,0.15);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.daily-word-quote {
+  font-size: 64px;
+  color: var(--gold);
+  opacity: 0.18;
+  font-family: Georgia, serif;
+  line-height: 1;
+  position: absolute;
+  top: -10px;
+  left: 10px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.daily-word-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.daily-word-text {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text);
+  font-style: italic;
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.daily-word-scripture {
+  font-size: 13px;
+  color: var(--purple-light);
+  font-weight: 600;
+  text-align: right;
+  position: relative;
+}
+
+.daily-word-empty {
+  background: var(--surface);
+  border-left-color: #ddd;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* ── Scheduled message rows in modal ── */
+.scheduled-msg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.scheduled-msg-info { flex: 1; min-width: 0; }
+
+.scheduled-msg-date {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--purple);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.scheduled-msg-preview {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -112,7 +112,8 @@ const DEFAULT_DATA = {
     { id: 2, series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer', date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
     { id: 3, series: 'Rooted',                     title: 'Finding Peace in the Storm',     date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
     { id: 4, series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
-  ]
+  ],
+  messages: []
 };
 
 // ── Firestore data layer ──
@@ -127,6 +128,7 @@ function subscribeData() {
     if (snap.exists()) {
       appData = snap.data();
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
+      if (!appData.messages)   appData.messages   = [];
     } else {
       churchDoc.set(appData).catch(err => console.error('Init error:', err));
     }
@@ -239,6 +241,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
 // ── Render all ──
 function renderAll() {
+  renderDailyMessage();
   renderLiveEvents();
   renderServices();
   renderLocation();
@@ -246,6 +249,158 @@ function renderAll() {
   renderEvents();
   renderDirectory();
   renderMedia();
+}
+
+// ── DAILY WORD ──
+function getTodayString() {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+function renderDailyMessage() {
+  const container = document.getElementById('daily-word-container');
+  if (!container) return;
+  const today = getTodayString();
+  const past = (appData.messages || [])
+    .filter(m => m.scheduledDate <= today)
+    .sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate) || b.scheduledTime.localeCompare(a.scheduledTime));
+
+  if (!past.length) {
+    container.innerHTML = '<div class="daily-word-card daily-word-empty"><p>No daily message yet.</p></div>';
+    return;
+  }
+  const m = past[0];
+  container.innerHTML = `
+    <div class="daily-word-card">
+      <div class="daily-word-quote">"</div>
+      <div class="daily-word-label">${esc(m.title || 'Daily Word')}</div>
+      <p class="daily-word-text">${esc(m.text)}</p>
+      ${m.scripture ? `<p class="daily-word-scripture">— ${esc(m.scripture)}</p>` : ''}
+    </div>`;
+}
+
+document.getElementById('schedule-word-btn').addEventListener('click', openScheduleModal);
+
+function openScheduleModal() {
+  const today = getTodayString();
+  const msgs  = (appData.messages || [])
+    .slice()
+    .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.scheduledTime.localeCompare(b.scheduledTime));
+
+  openModal('Schedule Daily Word', `
+    <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">New Message</p>
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input class="form-input" id="new-msg-date" type="date" value="${today}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Time</label>
+      <input class="form-input" id="new-msg-time" type="time" value="06:00" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Title / Label</label>
+      <input class="form-input" id="new-msg-title" value="Daily Word" placeholder="Daily Word" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Message</label>
+      <textarea class="form-textarea" id="new-msg-text" placeholder="Today's inspiring message..." style="min-height:90px"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Scripture Reference</label>
+      <input class="form-input" id="new-msg-scripture" placeholder="e.g. John 3:16" />
+    </div>
+    <button class="form-btn form-btn-primary" id="save-new-msg-btn">+ Schedule Message</button>
+
+    ${msgs.length ? `
+      <div style="margin-top:24px">
+        <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Scheduled (${msgs.length})</p>
+        ${msgs.map(m => `
+          <div class="scheduled-msg-row">
+            <div class="scheduled-msg-info">
+              <div class="scheduled-msg-date">${esc(m.scheduledDate)}${m.scheduledTime ? ' &bull; ' + esc(m.scheduledTime) : ''}</div>
+              <div class="scheduled-msg-preview">${esc(m.title || 'Daily Word')}: ${esc(m.text.length > 55 ? m.text.substring(0,55) + '…' : m.text)}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="card-action-btn" data-edit-msg="${m.id}">&#9998;</button>
+              <button class="card-action-btn delete" data-del-msg="${m.id}">&#128465;</button>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+  `, () => {
+    document.getElementById('save-new-msg-btn').addEventListener('click', () => {
+      const date      = document.getElementById('new-msg-date').value;
+      const time      = document.getElementById('new-msg-time').value;
+      const title     = document.getElementById('new-msg-title').value.trim();
+      const text      = document.getElementById('new-msg-text').value.trim();
+      const scripture = document.getElementById('new-msg-scripture').value.trim();
+      if (!text) return;
+      if (!appData.messages) appData.messages = [];
+      appData.messages.push({ id: nextId(appData.messages), scheduledDate: date, scheduledTime: time, title, text, scripture });
+      saveData();
+      openScheduleModal();
+    });
+
+    document.querySelectorAll('[data-del-msg]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = parseInt(btn.dataset.delMsg, 10);
+        if (!confirm('Delete this message?')) return;
+        appData.messages = appData.messages.filter(m => m.id !== id);
+        saveData();
+        openScheduleModal();
+      });
+    });
+
+    document.querySelectorAll('[data-edit-msg]').forEach(btn => {
+      btn.addEventListener('click', () => openEditMessageModal(parseInt(btn.dataset.editMsg, 10)));
+    });
+  });
+}
+
+function openEditMessageModal(id) {
+  const m = (appData.messages || []).find(x => x.id === id);
+  if (!m) return;
+  openModal('Edit Scheduled Message', `
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input class="form-input" id="edit-msg-date" type="date" value="${esc(m.scheduledDate)}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Time</label>
+      <input class="form-input" id="edit-msg-time" type="time" value="${esc(m.scheduledTime || '06:00')}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Title / Label</label>
+      <input class="form-input" id="edit-msg-title" value="${esc(m.title || 'Daily Word')}" />
+    </div>
+    <div class="form-group">
+      <label class="form-label">Message</label>
+      <textarea class="form-textarea" id="edit-msg-text" style="min-height:90px">${esc(m.text)}</textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Scripture Reference</label>
+      <input class="form-input" id="edit-msg-scripture" value="${esc(m.scripture || '')}" placeholder="e.g. John 3:16" />
+    </div>
+    <button class="form-btn form-btn-primary" id="update-msg-btn">Save Changes</button>
+    <button class="form-btn form-btn-danger" id="back-schedule-btn" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back to Schedule</button>
+  `, () => {
+    document.getElementById('update-msg-btn').addEventListener('click', () => {
+      const idx = appData.messages.findIndex(x => x.id === id);
+      if (idx < 0) return;
+      appData.messages[idx] = {
+        id,
+        scheduledDate: document.getElementById('edit-msg-date').value,
+        scheduledTime: document.getElementById('edit-msg-time').value,
+        title:         document.getElementById('edit-msg-title').value.trim(),
+        text:          document.getElementById('edit-msg-text').value.trim(),
+        scripture:     document.getElementById('edit-msg-scripture').value.trim()
+      };
+      saveData();
+      openScheduleModal();
+    });
+    document.getElementById('back-schedule-btn').addEventListener('click', openScheduleModal);
+  });
 }
 
 // ── LIVE EVENTS ──

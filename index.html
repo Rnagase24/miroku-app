@@ -17,7 +17,7 @@
   <!-- Login Screen -->
   <div class="login-screen" id="login-screen">
     <div class="login-card">
-      <div class="login-logo">&#9769;</div>
+      <div class="login-logo"><img src="logo.svg" alt="Miroku LA Church" /></div>
       <h2 class="login-church-name">Miroku LA Church</h2>
       <p class="login-tagline">Sign in to continue</p>
       <form id="login-form">
@@ -43,7 +43,7 @@
   <!-- Header -->
   <header class="app-header hidden" id="app-header">
     <div class="header-inner">
-      <div class="header-logo">&#9769;</div>
+      <div class="header-logo"><img src="logo.svg" alt="Miroku LA" /></div>
       <div class="header-text">
         <h1 class="header-title">Miroku LA Church</h1>
         <p class="header-subtitle">Welcome Home</p>
@@ -60,6 +60,13 @@
 
     <!-- HOME TAB -->
     <section class="tab-content active" id="tab-home">
+
+      <div class="section-header" style="margin-top:4px">
+        <h3 class="section-title">Daily Word</h3>
+        <button class="section-edit-btn admin-only" id="schedule-word-btn">Schedule</button>
+      </div>
+      <div id="daily-word-container"></div>
+
       <div class="hero-card">
         <h2>Good to see you!</h2>
         <p>Join us this Sunday and experience the love of community and faith.</p>
