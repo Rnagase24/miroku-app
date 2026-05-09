@@ -1,7 +1,23 @@
+// ── Firebase ──
+const firebaseConfig = {
+  apiKey:            'AIzaSyCVqbMV3bEkQ_thDAvFCDQltXR9eERAtfA',
+  authDomain:        'miroku-app-915e2.firebaseapp.com',
+  projectId:         'miroku-app-915e2',
+  storageBucket:     'miroku-app-915e2.firebasestorage.app',
+  messagingSenderId: '540305307612',
+  appId:             '1:540305307612:web:a7c16561030a075d334119'
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+
+const churchDoc = db.collection('church').doc('data');
+
 // ── Auth ──
 const SESSION_KEY = 'miroku-session';
 const USERS_KEY   = 'miroku-users';
-const DATA_KEY    = 'miroku-data';
 
 function getUsers() {
   try {
@@ -42,6 +58,7 @@ function login(username, password) {
 function logout() {
   currentUser = null;
   localStorage.removeItem(SESSION_KEY);
+  unsubscribeData();
   showApp(false);
 }
 
@@ -52,9 +69,9 @@ function isAdmin() {
 // ── Default Data ──
 const DEFAULT_DATA = {
   services: [
-    { id: 1, icon: '☀️', title: 'Sunday Morning',    time: '8:00 AM & 10:30 AM'  },
+    { id: 1, icon: '☀️', title: 'Sunday Morning',    time: '8:00 AM & 10:30 AM'   },
     { id: 2, icon: '🌆', title: 'Wednesday Evening', time: '6:30 PM — Bible Study' },
-    { id: 3, icon: '💖', title: 'Youth Group',        time: 'Friday 7:00 PM'       }
+    { id: 3, icon: '💖', title: 'Youth Group',        time: 'Friday 7:00 PM'        }
   ],
   location: {
     address: '123 Faith Avenue',
@@ -66,12 +83,12 @@ const DEFAULT_DATA = {
     email: 'info@mirokuLA.org'
   },
   events: [
-    { id: 1, date: 'Sun, May 11', title: "Mother's Day Celebration",    desc: 'A special service honoring all mothers in our congregation. Flowers provided.',           tag: 'Special Service'   },
-    { id: 2, date: 'Sat, May 17', title: 'Community Food Drive',         desc: 'Help pack and distribute food boxes for families in need. Volunteers welcome!',          tag: 'Community'         },
-    { id: 3, date: 'Fri, May 23', title: 'Youth Game Night',             desc: 'Fun, games, and fellowship for teens. Bring a friend! Snacks provided.',                 tag: 'Youth'             },
-    { id: 4, date: 'Sun, Jun 1',  title: 'Summer Kickoff Cookout',       desc: 'Join us after the 10:30 AM service for a church-wide cookout on the lawn.',              tag: 'Fellowship'        },
-    { id: 5, date: 'Sat, Jun 7',  title: "Men's Breakfast",              desc: "Monthly men's breakfast and Bible study. 8:00 AM in Fellowship Hall.",                  tag: "Men's Ministry"    },
-    { id: 6, date: 'Sat, Jun 14', title: "Women's Bible Study Retreat",  desc: 'A one-day retreat for women — worship, prayer, and fellowship.',                        tag: "Women's Ministry"  }
+    { id: 1, date: 'Sun, May 11', title: "Mother's Day Celebration",   desc: 'A special service honoring all mothers. Flowers provided.',           tag: 'Special Service'  },
+    { id: 2, date: 'Sat, May 17', title: 'Community Food Drive',        desc: 'Help pack food boxes for families in need. Volunteers welcome!',      tag: 'Community'        },
+    { id: 3, date: 'Fri, May 23', title: 'Youth Game Night',            desc: 'Fun and fellowship for teens. Bring a friend! Snacks provided.',      tag: 'Youth'            },
+    { id: 4, date: 'Sun, Jun 1',  title: 'Summer Kickoff Cookout',      desc: 'Join us after the 10:30 AM service for a cookout on the lawn.',       tag: 'Fellowship'       },
+    { id: 5, date: 'Sat, Jun 7',  title: "Men's Breakfast",             desc: "Monthly men's breakfast and Bible study. 8:00 AM in Fellowship Hall.", tag: "Men's Ministry"   },
+    { id: 6, date: 'Sat, Jun 14', title: "Women's Bible Study Retreat", desc: 'A one-day retreat for women — worship, prayer, and fellowship.',      tag: "Women's Ministry" }
   ],
   members: [
     { id: 1, name: 'Pastor David Williams', role: 'Senior Pastor',        phone: '(323) 555-0101' },
@@ -84,24 +101,42 @@ const DEFAULT_DATA = {
     { id: 8, name: 'Patricia Moore',        role: 'Prayer Team Lead',     phone: '(323) 555-0107' }
   ],
   media: [
-    { id: 1, series: 'Faith That Moves Mountains', title: 'When God Says Wait',               date: 'May 4, 2025',  pastor: 'Pastor David Williams', url: '#' },
-    { id: 2, series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer',   date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
-    { id: 3, series: 'Rooted',                     title: 'Finding Peace in the Storm',       date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
-    { id: 4, series: 'Rooted',                     title: 'Grace Greater Than Our Sin',       date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
+    { id: 1, series: 'Faith That Moves Mountains', title: 'When God Says Wait',             date: 'May 4, 2025',  pastor: 'Pastor David Williams', url: '#' },
+    { id: 2, series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer', date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
+    { id: 3, series: 'Rooted',                     title: 'Finding Peace in the Storm',     date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
+    { id: 4, series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
   ]
 };
 
-let appData;
+// ── Firestore data layer ──
+let appData = null;
+let dataUnsubscribe = null;
 
-function loadData() {
-  try {
-    const stored = localStorage.getItem(DATA_KEY);
-    return stored ? JSON.parse(stored) : deepCopy(DEFAULT_DATA);
-  } catch { return deepCopy(DEFAULT_DATA); }
+function subscribeData() {
+  showLoading(true);
+  dataUnsubscribe = churchDoc.onSnapshot(snap => {
+    if (snap.exists()) {
+      appData = snap.data();
+    } else {
+      appData = deepCopy(DEFAULT_DATA);
+      churchDoc.set(appData);
+    }
+    renderAll();
+    showLoading(false);
+  }, err => {
+    console.error('Firestore error:', err);
+    appData = deepCopy(DEFAULT_DATA);
+    renderAll();
+    showLoading(false);
+  });
+}
+
+function unsubscribeData() {
+  if (dataUnsubscribe) { dataUnsubscribe(); dataUnsubscribe = null; }
 }
 
 function saveData() {
-  localStorage.setItem(DATA_KEY, JSON.stringify(appData));
+  churchDoc.set(appData).catch(err => console.error('Save error:', err));
 }
 
 function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -118,6 +153,18 @@ function esc(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ── Loading indicator ──
+function showLoading(on) {
+  let el = document.getElementById('loading-bar');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'loading-bar';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;height:3px;background:var(--gold);z-index:9999;transition:opacity 0.3s';
+    document.body.appendChild(el);
+  }
+  el.style.opacity = on ? '1' : '0';
 }
 
 // ── Login form ──
@@ -153,8 +200,7 @@ function showApp(visible) {
   if (visible) {
     adminBadge.classList.toggle('hidden', !isAdmin());
     document.body.classList.toggle('is-admin', isAdmin());
-    appData = loadData();
-    renderAll();
+    subscribeData();
   } else {
     document.body.classList.remove('is-admin');
     document.getElementById('login-username').value = '';
@@ -215,7 +261,7 @@ function buildServicesForm() {
   return `
     <div id="services-form-list">${rows}</div>
     <button class="form-btn form-btn-primary" id="add-svc-row-btn" style="margin-top:4px">+ Add Service Time</button>
-    <button class="form-btn form-btn-primary" id="save-svc-btn" style="margin-top:8px;background:var(--purple-light)">Save</button>
+    <button class="form-btn form-btn-primary" id="save-svc-btn" style="margin-top:8px">Save</button>
   `;
 }
 
@@ -245,7 +291,6 @@ function bindServicesForm() {
       appData.services[i].time  = row.querySelector('.svc-time-input').value.trim();
     });
     saveData();
-    renderServices();
     closeModal();
   });
 }
@@ -292,14 +337,12 @@ document.getElementById('edit-location-btn').addEventListener('click', () => {
     <button class="form-btn form-btn-primary" id="save-location-btn">Save</button>
   `, () => {
     document.getElementById('save-location-btn').addEventListener('click', () => {
-      appData.location.address  = document.getElementById('f-address').value.trim();
-      appData.location.city     = document.getElementById('f-city').value.trim();
-      appData.location.mapsUrl  = document.getElementById('f-maps').value.trim();
-      appData.contact.phone     = document.getElementById('f-phone').value.trim();
-      appData.contact.email     = document.getElementById('f-email').value.trim();
+      appData.location.address = document.getElementById('f-address').value.trim();
+      appData.location.city    = document.getElementById('f-city').value.trim();
+      appData.location.mapsUrl = document.getElementById('f-maps').value.trim();
+      appData.contact.phone    = document.getElementById('f-phone').value.trim();
+      appData.contact.email    = document.getElementById('f-email').value.trim();
       saveData();
-      renderLocation();
-      renderContact();
       closeModal();
     });
   });
@@ -394,7 +437,8 @@ function openEventModal(id) {
       } else {
         appData.events.push({ id: nextId(appData.events), date, title, desc, tag });
       }
-      saveData(); renderEvents(); closeModal();
+      saveData();
+      closeModal();
     });
     const delBtn = document.getElementById('del-event-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteEvent(id); closeModal(); });
@@ -404,7 +448,7 @@ function openEventModal(id) {
 function deleteEvent(id) {
   if (!confirm('Delete this event?')) return;
   appData.events = appData.events.filter(e => e.id !== id);
-  saveData(); renderEvents();
+  saveData();
 }
 
 // ── DIRECTORY ──
@@ -481,7 +525,8 @@ function openMemberModal(id) {
       } else {
         appData.members.push({ id: nextId(appData.members), name, role, phone });
       }
-      saveData(); renderDirectory(document.getElementById('directory-search').value); closeModal();
+      saveData();
+      closeModal();
     });
     const delBtn = document.getElementById('del-member-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteMember(id); closeModal(); });
@@ -491,7 +536,7 @@ function openMemberModal(id) {
 function deleteMember(id) {
   if (!confirm('Remove this member?')) return;
   appData.members = appData.members.filter(m => m.id !== id);
-  saveData(); renderDirectory(document.getElementById('directory-search').value);
+  saveData();
 }
 
 // ── MEDIA ──
@@ -568,7 +613,8 @@ function openMediaModal(id) {
       } else {
         appData.media.push({ id: nextId(appData.media), series, title, date, pastor, url });
       }
-      saveData(); renderMedia(); closeModal();
+      saveData();
+      closeModal();
     });
     const delBtn = document.getElementById('del-media-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteMedia(id); closeModal(); });
@@ -578,7 +624,7 @@ function openMediaModal(id) {
 function deleteMedia(id) {
   if (!confirm('Delete this sermon?')) return;
   appData.media = appData.media.filter(m => m.id !== id);
-  saveData(); renderMedia();
+  saveData();
 }
 
 // ── Modal system ──
@@ -587,7 +633,6 @@ function openModal(title, bodyHtml, onReady) {
   document.getElementById('modal-body').innerHTML = bodyHtml;
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('modal-card').scrollTop = 0;
-
   if (title === 'Edit Service Times') bindServicesForm();
   if (onReady) onReady();
 }
