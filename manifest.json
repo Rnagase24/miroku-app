@@ -1,0 +1,24 @@
+{
+  "name": "Grace Community Church",
+  "short_name": "Grace Church",
+  "description": "Grace Community Church mobile app — services, events, directory, and media.",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#4a1c6e",
+  "theme_color": "#4a1c6e",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

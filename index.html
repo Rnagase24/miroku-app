@@ -1,5 +1,143 @@
 <!DOCTYPE html>
-    <body>
-        <script src="./index.js"></script>
-    </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#4a1c6e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Grace Church" />
+  <meta name="description" content="Grace Community Church mobile app" />
+  <title>Grace Community Church</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="header-logo">&#9769;</div>
+      <div>
+        <h1 class="header-title">Grace Community Church</h1>
+        <p class="header-subtitle">Welcome Home</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="app-main" id="app-main">
+
+    <!-- HOME TAB -->
+    <section class="tab-content active" id="tab-home">
+      <div class="hero-card">
+        <h2>Good to see you!</h2>
+        <p>Join us this Sunday and experience the love of community and faith.</p>
+      </div>
+
+      <h3 class="section-title">Service Times</h3>
+      <div class="card-list">
+        <div class="card">
+          <div class="card-icon">&#9728;</div>
+          <div class="card-body">
+            <h4>Sunday Morning</h4>
+            <p>8:00 AM &amp; 10:30 AM</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-icon">&#127748;</div>
+          <div class="card-body">
+            <h4>Wednesday Evening</h4>
+            <p>6:30 PM — Bible Study</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-icon">&#128149;</div>
+          <div class="card-body">
+            <h4>Youth Group</h4>
+            <p>Friday 7:00 PM</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 class="section-title">Find Us</h3>
+      <div class="card location-card">
+        <div class="card-icon">&#128205;</div>
+        <div class="card-body">
+          <h4>123 Faith Avenue</h4>
+          <p>Springfield, IL 62701</p>
+          <a class="link-button" href="https://maps.google.com/?q=123+Faith+Avenue+Springfield+IL" target="_blank">Get Directions</a>
+        </div>
+      </div>
+
+      <h3 class="section-title">Contact Us</h3>
+      <div class="card-list">
+        <div class="card">
+          <div class="card-icon">&#128222;</div>
+          <div class="card-body">
+            <h4>Phone</h4>
+            <p><a href="tel:+12175550100">(217) 555-0100</a></p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-icon">&#9993;</div>
+          <div class="card-body">
+            <h4>Email</h4>
+            <p><a href="mailto:info@gracechurch.org">info@gracechurch.org</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EVENTS TAB -->
+    <section class="tab-content" id="tab-events">
+      <h3 class="section-title">Upcoming Events</h3>
+      <div id="events-list" class="card-list"></div>
+    </section>
+
+    <!-- DIRECTORY TAB -->
+    <section class="tab-content" id="tab-directory">
+      <div class="search-bar-wrap">
+        <input class="search-bar" id="directory-search" type="search" placeholder="Search members..." />
+      </div>
+      <div id="directory-list" class="card-list"></div>
+    </section>
+
+    <!-- MEDIA TAB -->
+    <section class="tab-content" id="tab-media">
+      <h3 class="section-title">Sermons &amp; Media</h3>
+      <div id="media-list" class="card-list"></div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-tab="home">
+      <span class="nav-icon">&#127968;</span>
+      <span class="nav-label">Home</span>
+    </button>
+    <button class="nav-btn" data-tab="events">
+      <span class="nav-icon">&#128197;</span>
+      <span class="nav-label">Events</span>
+    </button>
+    <button class="nav-btn" data-tab="directory">
+      <span class="nav-icon">&#128101;</span>
+      <span class="nav-label">Directory</span>
+    </button>
+    <button class="nav-btn" data-tab="media">
+      <span class="nav-icon">&#127897;</span>
+      <span class="nav-label">Media</span>
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js');
+      });
+    }
+  </script>
+</body>
 </html>
