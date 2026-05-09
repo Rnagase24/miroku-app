@@ -136,6 +136,7 @@ function unsubscribeData() {
 }
 
 function saveData() {
+  renderAll();
   churchDoc.set(appData).catch(err => console.error('Save error:', err));
 }
 
