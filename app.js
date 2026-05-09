@@ -5,14 +5,15 @@ const firebaseConfig = {
   projectId:         'miroku-app-915e2',
   storageBucket:     'miroku-app-915e2.firebasestorage.app',
   messagingSenderId: '540305307612',
-  appId:             '1:540305307612:web:a7c16561030a075d334119'
+  appId:             '1:540305307612:web:a7c16561030a075d334119',
+  databaseURL:       'https://miroku-app-915e2-default-rtdb.firebaseio.com'
 };
 
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const churchDoc   = db.collection('church').doc('data');
-const settingsDoc = db.collection('church').doc('settings');
-const accountsDoc = db.collection('church').doc('accounts');
+const db = firebase.database();
+const churchRef   = db.ref('church/data');
+const settingsRef = db.ref('church/settings');
+const accountsRef = db.ref('church/accounts');
 
 // ── Auth ──
 const SESSION_KEY = 'miroku-session';
@@ -39,7 +40,7 @@ function getDefaultUsers() {
 function saveUsers(users) {
   usersCache = users;
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  accountsDoc.set(users).catch(err => {
+  accountsRef.set(users).catch(err => {
     console.error('Account sync error:', err);
     showToast('Warning: accounts may not sync to other devices. Check Firebase rules.', 'error');
   });
@@ -47,17 +48,17 @@ function saveUsers(users) {
 
 async function loadUsersFromFirestore() {
   try {
-    const snap = await accountsDoc.get();
+    const snap = await accountsRef.once('value');
     if (snap.exists()) {
-      usersCache = snap.data();
+      usersCache = snap.val();
       localStorage.setItem(USERS_KEY, JSON.stringify(usersCache));
     } else {
       try { usersCache = JSON.parse(localStorage.getItem(USERS_KEY) || 'null') || getDefaultUsers(); }
       catch { usersCache = getDefaultUsers(); }
-      accountsDoc.set(usersCache).catch(() => {});
+      accountsRef.set(usersCache).catch(() => {});
     }
   } catch {
-    usersCache = null; // Firestore unavailable — getUsers() falls back to localStorage
+    usersCache = null; // Database unavailable — getUsers() falls back to localStorage
   }
 }
 
@@ -152,7 +153,7 @@ const DEFAULT_DATA = {
   messages: []
 };
 
-// ── Firestore data layer ──
+// ── Realtime Database layer ──
 let appData = null;
 let dataUnsubscribe = null;
 
@@ -160,21 +161,27 @@ function subscribeData() {
   appData = deepCopy(DEFAULT_DATA);
   renderAll();
   showLoading(true);
-  dataUnsubscribe = churchDoc.onSnapshot(snap => {
+
+  const handler = snap => {
     if (snap.exists()) {
-      appData = snap.data();
+      appData = snap.val();
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.messages)   appData.messages   = [];
     } else {
-      churchDoc.set(appData).catch(err => console.error('Init error:', err));
+      churchRef.set(appData).catch(err => console.error('Init error:', err));
     }
     renderAll();
     showLoading(false);
-  }, err => {
-    console.error('Firestore error:', err);
+  };
+
+  const errHandler = err => {
+    console.error('Database error:', err);
     showLoading(false);
-    showToast('⚠️ Cannot reach database — Firebase rules may be blocking reads. Data shown may be outdated.', 'error');
-  });
+    showToast('⚠️ Cannot reach database [' + (err.code || err.message || 'unknown') + '] — check Realtime Database rules', 'error');
+  };
+
+  churchRef.on('value', handler, errHandler);
+  dataUnsubscribe = () => churchRef.off('value', handler);
 }
 
 function unsubscribeData() {
@@ -183,9 +190,9 @@ function unsubscribeData() {
 
 function saveData() {
   renderAll();
-  churchDoc.set(appData).catch(err => {
+  churchRef.set(appData).catch(err => {
     console.error('Save error:', err);
-    showToast('⚠️ Save failed [' + (err.code || err.message || 'unknown') + '] — tap for help', 'error');
+    showToast('⚠️ Save failed [' + (err.code || err.message || 'unknown') + ']', 'error');
   });
 }
 
@@ -945,8 +952,8 @@ function deleteMedia(id) {
 // ── SETTINGS ──
 function initSettings() {
   // Load persisted settings from Firestore
-  settingsDoc.get().then(snap => {
-    const data = snap.exists() ? snap.data() : {};
+  settingsRef.once('value').then(snap => {
+    const data = snap.exists() ? snap.val() : {};
     const userSettings = (data[currentUser.username]) || {};
 
     const nameInput = document.getElementById('settings-display-name');
@@ -989,10 +996,10 @@ function initSettings() {
 }
 
 function saveUserSettings(patch) {
-  settingsDoc.get().then(snap => {
-    const data = snap.exists() ? snap.data() : {};
+  settingsRef.once('value').then(snap => {
+    const data = snap.exists() ? snap.val() : {};
     data[currentUser.username] = Object.assign(data[currentUser.username] || {}, patch);
-    settingsDoc.set(data);
+    settingsRef.set(data);
   }).catch(() => {
     // localStorage fallback
     if (patch.displayName) {
@@ -1074,13 +1081,13 @@ async function handleNotifToggle(key, enabled) {
 }
 
 function updateNotifPref(key, value) {
-  settingsDoc.get().then(snap => {
-    const data = snap.exists() ? snap.data() : {};
+  settingsRef.once('value').then(snap => {
+    const data = snap.exists() ? snap.val() : {};
     const userSettings = data[currentUser.username] || {};
     userSettings.notifPrefs = userSettings.notifPrefs || {};
     userSettings.notifPrefs[key] = value;
     data[currentUser.username] = userSettings;
-    settingsDoc.set(data);
+    settingsRef.set(data);
   }).catch(() => {
     const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
     prefs[key] = value;
