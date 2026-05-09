@@ -10,15 +10,19 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const churchDoc  = db.collection('church').doc('data');
+const churchDoc   = db.collection('church').doc('data');
 const settingsDoc = db.collection('church').doc('settings');
+const accountsDoc = db.collection('church').doc('accounts');
 
 // ── Auth ──
 const SESSION_KEY = 'miroku-session';
 const USERS_KEY   = 'miroku-users';
 const NOTIF_KEY   = 'miroku-notif';
 
+let usersCache = null; // null = not yet loaded from Firestore
+
 function getUsers() {
+  if (usersCache !== null) return usersCache;
   try {
     const s = localStorage.getItem(USERS_KEY);
     return s ? JSON.parse(s) : getDefaultUsers();
@@ -33,7 +37,39 @@ function getDefaultUsers() {
 }
 
 function saveUsers(users) {
+  usersCache = users;
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
+  accountsDoc.set(users).catch(err => {
+    console.error('Account sync error:', err);
+    showToast('Warning: accounts may not sync to other devices. Check Firebase rules.', 'error');
+  });
+}
+
+async function loadUsersFromFirestore() {
+  try {
+    const snap = await accountsDoc.get();
+    if (snap.exists()) {
+      usersCache = snap.data();
+      localStorage.setItem(USERS_KEY, JSON.stringify(usersCache));
+    } else {
+      try { usersCache = JSON.parse(localStorage.getItem(USERS_KEY) || 'null') || getDefaultUsers(); }
+      catch { usersCache = getDefaultUsers(); }
+      accountsDoc.set(usersCache).catch(() => {});
+    }
+  } catch {
+    usersCache = null; // Firestore unavailable — getUsers() falls back to localStorage
+  }
+}
+
+function showToast(msg, type = 'info') {
+  let el = document.getElementById('app-toast');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.id = 'app-toast';
+  el.className = 'app-toast app-toast-' + type;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 6000);
 }
 
 let currentUser = null;
@@ -137,6 +173,7 @@ function subscribeData() {
   }, err => {
     console.error('Firestore error:', err);
     showLoading(false);
+    showToast('⚠️ Cannot reach database — Firebase rules may be blocking reads. Data shown may be outdated.', 'error');
   });
 }
 
@@ -146,7 +183,10 @@ function unsubscribeData() {
 
 function saveData() {
   renderAll();
-  churchDoc.set(appData).catch(err => console.error('Save error:', err));
+  churchDoc.set(appData).catch(err => {
+    console.error('Save error:', err);
+    showToast('⚠️ Changes not saved — your Firebase rules are blocking writes. See instructions.', 'error');
+  });
 }
 
 function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -181,10 +221,10 @@ async function storeCredential(username, password) {
 }
 
 async function tryAutoLogin() {
-  // Already have a valid session — go straight in
+  await loadUsersFromFirestore(); // sync accounts from Firestore before checking credentials
+
   if (checkSession()) { showApp(true); return; }
 
-  // Try to silently retrieve a saved credential (triggers Face ID on iOS)
   if (!('credentials' in navigator) || !window.PasswordCredential) return;
   try {
     const cred = await navigator.credentials.get({ password: true, mediation: 'silent' });
@@ -225,6 +265,11 @@ function showApp(visible) {
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
       document.getElementById('schedule-word-btn').addEventListener('click', openScheduleModal);
+    }
+    const acctBtn = document.getElementById('manage-accounts-btn');
+    if (acctBtn) {
+      acctBtn.replaceWith(acctBtn.cloneNode(true));
+      document.getElementById('manage-accounts-btn').addEventListener('click', openAccountsModal);
     }
   } else {
     document.body.classList.remove('is-admin');
@@ -403,6 +448,102 @@ function openEditMessageModal(id) {
       openScheduleModal();
     });
     document.getElementById('back-schedule-btn').addEventListener('click', openScheduleModal);
+  });
+}
+
+// ── MEMBER ACCOUNTS ──
+function openAccountsModal() {
+  const users = getUsers();
+  const list  = Object.entries(users).map(([u, d]) => ({ username: u, ...d }));
+  openModal('Member Accounts', `
+    <div style="margin-bottom:20px">
+      ${list.map(u => `
+        <div class="scheduled-msg-row">
+          <div class="scheduled-msg-info">
+            <div class="scheduled-msg-date">${esc(u.username)} &bull; <span style="text-transform:capitalize">${esc(u.role)}</span></div>
+            <div class="scheduled-msg-preview">${esc(u.displayName || u.username)}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="card-action-btn" data-edit-acct="${esc(u.username)}">&#9998;</button>
+            ${u.username !== currentUser.username ? `<button class="card-action-btn delete" data-del-acct="${esc(u.username)}">&#128465;</button>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>
+    <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Add New Account</p>
+    <div class="form-group"><label class="form-label">Username</label>
+      <input class="form-input" id="new-acct-user" placeholder="e.g. jane.doe" autocapitalize="none" autocorrect="off" /></div>
+    <div class="form-group"><label class="form-label">Display Name</label>
+      <input class="form-input" id="new-acct-display" placeholder="Full name" /></div>
+    <div class="form-group"><label class="form-label">Password</label>
+      <input class="form-input" id="new-acct-pw" type="password" placeholder="Min 6 characters" /></div>
+    <div class="form-group"><label class="form-label">Role</label>
+      <select class="form-input" id="new-acct-role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select></div>
+    <button class="form-btn form-btn-primary" id="add-acct-btn">+ Create Account</button>
+  `, () => {
+    document.querySelectorAll('[data-edit-acct]').forEach(btn => {
+      btn.addEventListener('click', () => openEditAccountModal(btn.dataset.editAcct));
+    });
+    document.querySelectorAll('[data-del-acct]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const uname = btn.dataset.delAcct;
+        if (!confirm(`Delete account "${uname}"?`)) return;
+        const u = getUsers();
+        delete u[uname];
+        saveUsers(u);
+        openAccountsModal();
+      });
+    });
+    document.getElementById('add-acct-btn').addEventListener('click', () => {
+      const username    = document.getElementById('new-acct-user').value.toLowerCase().trim().replace(/\s+/g, '.');
+      const displayName = document.getElementById('new-acct-display').value.trim();
+      const password    = document.getElementById('new-acct-pw').value;
+      const role        = document.getElementById('new-acct-role').value;
+      if (!username || !password) { showToast('Username and password are required.', 'error'); return; }
+      if (password.length < 6)    { showToast('Password must be at least 6 characters.', 'error'); return; }
+      const u = getUsers();
+      if (u[username])            { showToast('That username already exists.', 'error'); return; }
+      u[username] = { password, role, displayName: displayName || username };
+      saveUsers(u);
+      showToast(`Account "${username}" created! Share the username and password with them.`, 'info');
+      openAccountsModal();
+    });
+  });
+}
+
+function openEditAccountModal(username) {
+  const users = getUsers();
+  const u = users[username];
+  if (!u) return;
+  openModal('Edit Account', `
+    <div class="form-group"><label class="form-label">Username</label>
+      <input class="form-input" value="${esc(username)}" disabled style="opacity:.55" /></div>
+    <div class="form-group"><label class="form-label">Display Name</label>
+      <input class="form-input" id="ea-display" value="${esc(u.displayName || '')}" /></div>
+    <div class="form-group"><label class="form-label">New Password</label>
+      <input class="form-input" id="ea-pw" type="password" placeholder="Leave blank to keep current" /></div>
+    <div class="form-group"><label class="form-label">Role</label>
+      <select class="form-input" id="ea-role">
+        <option value="member" ${u.role === 'member' ? 'selected' : ''}>Member</option>
+        <option value="admin"  ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>
+      </select></div>
+    <button class="form-btn form-btn-primary" id="ea-save">Save Changes</button>
+    <button class="form-btn" id="ea-back" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back</button>
+  `, () => {
+    document.getElementById('ea-save').addEventListener('click', () => {
+      const displayName = document.getElementById('ea-display').value.trim();
+      const newPw       = document.getElementById('ea-pw').value;
+      const role        = document.getElementById('ea-role').value;
+      if (newPw && newPw.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+      const u2 = getUsers();
+      u2[username] = { ...u2[username], displayName: displayName || username, role, ...(newPw ? { password: newPw } : {}) };
+      saveUsers(u2);
+      showToast('Account updated!', 'info');
+      openAccountsModal();
+    });
+    document.getElementById('ea-back').addEventListener('click', openAccountsModal);
   });
 }
 
