@@ -66,6 +66,12 @@
       </div>
 
       <div class="section-header">
+        <h3 class="section-title">Live Events</h3>
+        <button class="section-edit-btn admin-only" id="edit-live-btn">Edit</button>
+      </div>
+      <div id="live-events-list" class="live-events-grid"></div>
+
+      <div class="section-header">
         <h3 class="section-title">Service Times</h3>
         <button class="section-edit-btn admin-only" id="edit-services-btn">Edit</button>
       </div>
@@ -113,6 +119,78 @@
       <div id="media-list" class="card-list"></div>
     </section>
 
+    <!-- SETTINGS TAB -->
+    <section class="tab-content" id="tab-settings">
+
+      <h3 class="section-title" style="margin-top:8px">My Profile</h3>
+      <div class="settings-card">
+        <div class="form-group">
+          <label class="form-label">Display Name</label>
+          <input class="form-input" id="settings-display-name" placeholder="Your name" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Current Password</label>
+          <input class="form-input" id="settings-current-pw" type="password" placeholder="Current password" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input class="form-input" id="settings-new-pw" type="password" placeholder="Leave blank to keep current" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm New Password</label>
+          <input class="form-input" id="settings-confirm-pw" type="password" placeholder="Confirm new password" />
+        </div>
+        <p class="settings-msg" id="settings-profile-msg"></p>
+        <button class="form-btn form-btn-primary" id="settings-save-btn">Save Profile</button>
+      </div>
+
+      <h3 class="section-title">Notifications</h3>
+      <p class="settings-note">Choose what you'd like to be notified about.</p>
+      <div class="card-list">
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-title">Upcoming Events</div>
+            <div class="toggle-sub">New events and announcements</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-events" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-title">Service Times</div>
+            <div class="toggle-sub">Reminders for Sunday services</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-services" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-title">Live Streaming</div>
+            <div class="toggle-sub">When a live stream goes live</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-live" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-title">Classes &amp; Groups</div>
+            <div class="toggle-sub">Bible study and small groups</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-classes" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+    </section>
+
   </main>
 
   <!-- Bottom Navigation -->
@@ -132,6 +210,10 @@
     <button class="nav-btn" data-tab="media">
       <span class="nav-icon">&#127897;</span>
       <span class="nav-label">Media</span>
+    </button>
+    <button class="nav-btn" data-tab="settings">
+      <span class="nav-icon">&#9881;</span>
+      <span class="nav-label">Settings</span>
     </button>
   </nav>
 
