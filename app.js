@@ -145,17 +145,20 @@ const DEFAULT_DATA = {
     { id: 8, name: 'Patricia Moore',        role: 'Prayer Team Lead',     phone: '(323) 555-0107', email: 'patricia@mirokuLA.org' }
   ],
   media: [
-    { id: 1, series: 'Faith That Moves Mountains', title: 'When God Says Wait',             date: 'May 4, 2025',  pastor: 'Pastor David Williams', url: '#' },
-    { id: 2, series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer', date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
-    { id: 3, series: 'Rooted',                     title: 'Finding Peace in the Storm',     date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
-    { id: 4, series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
+    { id: 1, source: 'other', series: 'Faith That Moves Mountains', title: 'When God Says Wait',             date: 'May 4, 2025',  pastor: 'Pastor David Williams', url: '#' },
+    { id: 2, source: 'other', series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer', date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
+    { id: 3, source: 'other', series: 'Rooted',                     title: 'Finding Peace in the Storm',     date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
+    { id: 4, source: 'other', series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
   ],
-  messages: []
+  messages: [],
+  youtube: { channelId: '', apiKey: '' }
 };
 
 // ── Realtime Database layer ──
 let appData = null;
 let dataUnsubscribe = null;
+let ytVideos = [];   // auto-fetched YouTube videos
+let ytSynced = false;
 
 function subscribeData() {
   appData = deepCopy(DEFAULT_DATA);
@@ -174,11 +177,13 @@ function subscribeData() {
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
+      if (!appData.youtube)    appData.youtube    = { channelId: '', apiKey: '' };
     } else {
       churchRef.set(appData).catch(err => console.error('Init error:', err));
     }
     renderAll();
     showLoading(false);
+    if (!ytSynced) { ytSynced = true; refreshYouTube(); }
   };
 
   const errHandler = err => {
@@ -193,6 +198,7 @@ function subscribeData() {
 
 function unsubscribeData() {
   if (dataUnsubscribe) { dataUnsubscribe(); dataUnsubscribe = null; }
+  ytVideos = []; ytSynced = false;
 }
 
 function saveData() {
@@ -314,6 +320,20 @@ function showApp(visible) {
       acctBtn.replaceWith(acctBtn.cloneNode(true));
       document.getElementById('manage-accounts-btn').addEventListener('click', openAccountsModal);
     }
+    const ytBtn = document.getElementById('save-yt-btn');
+    if (ytBtn) {
+      ytBtn.replaceWith(ytBtn.cloneNode(true));
+      document.getElementById('save-yt-btn').addEventListener('click', () => {
+        const channelId = document.getElementById('yt-channel-id').value.trim();
+        const apiKey    = document.getElementById('yt-api-key').value.trim();
+        if (!appData.youtube) appData.youtube = {};
+        appData.youtube.channelId = channelId;
+        appData.youtube.apiKey    = apiKey;
+        saveData();
+        ytSynced = false;
+        refreshYouTube().then(() => showToast('YouTube synced!', 'info'));
+      });
+    }
   } else {
     document.body.classList.remove('is-admin');
     document.getElementById('login-username').value = '';
@@ -332,6 +352,48 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   });
 });
 
+// ── YouTube auto-sync ──
+async function refreshYouTube() {
+  const yt = (appData && appData.youtube) || {};
+  if (!yt.channelId || !yt.apiKey) return;
+  try {
+    const res  = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(yt.channelId)}&type=video&order=date&maxResults=20&key=${encodeURIComponent(yt.apiKey)}`
+    );
+    const json = await res.json();
+    if (json.error) {
+      showToast('YouTube sync failed: ' + (json.error.message || 'check your API key'), 'error');
+      return;
+    }
+    ytVideos = (json.items || []).map(item => ({
+      source:  'youtube',
+      videoId: item.id.videoId,
+      title:   item.snippet.title,
+      date:    formatYTDate(item.snippet.publishedAt),
+      channel: item.snippet.channelTitle,
+      thumb:   (item.snippet.thumbnails.medium || item.snippet.thumbnails.default || {}).url || '',
+      url:     'https://www.youtube.com/watch?v=' + item.id.videoId
+    }));
+    renderMedia();
+  } catch (err) {
+    console.error('YouTube fetch error:', err);
+  }
+}
+
+function formatYTDate(iso) {
+  const d = new Date(iso);
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return M[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+}
+
+function renderYouTubeSettings() {
+  const yt = (appData && appData.youtube) || {};
+  const cEl = document.getElementById('yt-channel-id');
+  const kEl = document.getElementById('yt-api-key');
+  if (cEl && document.activeElement !== cEl) cEl.value = yt.channelId || '';
+  if (kEl && document.activeElement !== kEl) kEl.value = yt.apiKey    || '';
+}
+
 // ── Render all ──
 function renderAll() {
   renderDailyMessage();
@@ -342,6 +404,7 @@ function renderAll() {
   renderEvents();
   renderDirectory();
   renderMedia();
+  renderYouTubeSettings();
 }
 
 // ── DAILY WORD ──
@@ -915,26 +978,51 @@ function deleteMember(id) {
 // ── MEDIA ──
 function renderMedia() {
   const list = document.getElementById('media-list');
-  if (!(appData.media || []).length) {
-    list.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">No sermons yet.</p>';
-    return;
-  }
-  list.innerHTML = appData.media.map(m => `
-    <div class="media-card">
-      <div class="media-thumb">&#127897;</div>
+
+  const ytHTML = ytVideos.map(v => `
+    <div class="media-card yt-card">
+      ${v.thumb ? `<div class="media-thumb-img"><img src="${esc(v.thumb)}" alt="${esc(v.title)}" loading="lazy" /></div>`
+                : `<div class="media-thumb yt-thumb">&#9654;</div>`}
       <div class="media-body">
-        <div class="media-series">${esc(m.series)}</div>
-        <div class="media-title">${esc(m.title)}</div>
-        <div class="media-meta">${esc(m.date)} &bull; ${esc(m.pastor)}</div>
+        <div class="media-source-badge yt-badge">&#9654; YouTube</div>
+        <div class="media-title">${esc(v.title)}</div>
+        <div class="media-meta">${esc(v.date)} &bull; ${esc(v.channel)}</div>
         <div class="media-footer">
-          <a class="media-btn" href="${esc(m.url)}" target="_blank">&#9654; Listen</a>
+          <a class="media-btn yt-btn" href="${esc(v.url)}" target="_blank">&#9654; Watch on YouTube</a>
+        </div>
+      </div>
+    </div>`).join('');
+
+  const manualHTML = (appData.media || []).map(m => {
+    const isFB = m.source === 'facebook';
+    return `
+    <div class="media-card${isFB ? ' fb-card' : ''}">
+      <div class="media-thumb${isFB ? ' fb-thumb' : ''}">
+        ${isFB ? '&#128248;' : '&#127897;'}
+      </div>
+      <div class="media-body">
+        ${isFB ? '<div class="media-source-badge fb-badge">&#128248; Facebook</div>' : ''}
+        ${m.series ? `<div class="media-series">${esc(m.series)}</div>` : ''}
+        <div class="media-title">${esc(m.title)}</div>
+        <div class="media-meta">${esc(m.date)}${m.pastor ? ' &bull; ' + esc(m.pastor) : ''}</div>
+        <div class="media-footer">
+          <a class="media-btn${isFB ? ' fb-btn' : ''}" href="${esc(m.url)}" target="_blank">
+            &#9654; Watch${isFB ? ' on Facebook' : ''}
+          </a>
           <div class="card-actions admin-only">
             <button class="card-action-btn" data-action="edit-media" data-id="${m.id}">&#9998;</button>
             <button class="card-action-btn delete" data-action="del-media" data-id="${m.id}">&#128465;</button>
           </div>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+
+  if (!ytHTML && !manualHTML) {
+    list.innerHTML = '<p style="color:var(--text-muted);padding:8px 0;">No recordings yet. YouTube videos will appear here automatically once you add your channel in Settings.</p>';
+    return;
+  }
+  list.innerHTML = ytHTML + manualHTML;
   document.querySelectorAll('[data-action="edit-media"]').forEach(b =>
     b.addEventListener('click', () => openMediaModal(parseInt(b.dataset.id, 10))));
   document.querySelectorAll('[data-action="del-media"]').forEach(b =>
@@ -945,32 +1033,40 @@ document.getElementById('add-media-btn').addEventListener('click', () => openMed
 
 function openMediaModal(id) {
   const m = id ? appData.media.find(x => x.id === id) : null;
-  openModal(m ? 'Edit Sermon' : 'Add Sermon', `
-    <div class="form-group"><label class="form-label">Series Name</label>
-      <input class="form-input" id="f-series" value="${esc(m ? m.series : '')}" placeholder="Series name" /></div>
-    <div class="form-group"><label class="form-label">Sermon Title</label>
+  const src = m ? (m.source || 'other') : 'facebook';
+  openModal(m ? 'Edit Recording' : 'Add Recording', `
+    <div class="form-group"><label class="form-label">Platform</label>
+      <select class="form-input" id="f-source">
+        <option value="facebook" ${src === 'facebook' ? 'selected' : ''}>&#128248; Facebook Video</option>
+        <option value="other"    ${src === 'other'    ? 'selected' : ''}>&#127897; Other / Audio</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Series / Service Name</label>
+      <input class="form-input" id="f-series" value="${esc(m ? m.series || '' : '')}" placeholder="e.g. Sunday Service" /></div>
+    <div class="form-group"><label class="form-label">Title</label>
       <input class="form-input" id="f-title" value="${esc(m ? m.title : '')}" placeholder="Sermon title" /></div>
     <div class="form-group"><label class="form-label">Date</label>
-      <input class="form-input" id="f-date" value="${esc(m ? m.date : '')}" placeholder="e.g. May 4, 2025" /></div>
+      <input class="form-input" id="f-date" type="date" value="${esc(m ? toInputDate(m.date) : '')}" /></div>
     <div class="form-group"><label class="form-label">Speaker</label>
-      <input class="form-input" id="f-pastor" value="${esc(m ? m.pastor : '')}" placeholder="Speaker name" /></div>
-    <div class="form-group"><label class="form-label">Audio / Video URL</label>
-      <input class="form-input" id="f-url" type="url" value="${esc(m && m.url !== '#' ? m.url : '')}" placeholder="https://..." /></div>
+      <input class="form-input" id="f-pastor" value="${esc(m ? m.pastor || '' : '')}" placeholder="Speaker name" /></div>
+    <div class="form-group"><label class="form-label">Video URL</label>
+      <input class="form-input" id="f-url" type="url" value="${esc(m && m.url !== '#' ? m.url : '')}"
+        placeholder="Paste the Facebook or video link here" /></div>
     <button class="form-btn form-btn-primary" id="save-media-btn">Save</button>
-    ${m ? '<button class="form-btn form-btn-danger" id="del-media-btn">Delete Sermon</button>' : ''}
+    ${m ? '<button class="form-btn form-btn-danger" id="del-media-btn">Delete</button>' : ''}
   `, () => {
     document.getElementById('save-media-btn').addEventListener('click', () => {
+      const source = document.getElementById('f-source').value;
       const series = document.getElementById('f-series').value.trim();
       const title  = document.getElementById('f-title').value.trim();
-      const date   = document.getElementById('f-date').value.trim();
+      const date   = fromInputDate(document.getElementById('f-date').value);
       const pastor = document.getElementById('f-pastor').value.trim();
       const url    = document.getElementById('f-url').value.trim() || '#';
       if (!title) return;
       if (id) {
         const idx = appData.media.findIndex(x => x.id === id);
-        if (idx >= 0) appData.media[idx] = { id, series, title, date, pastor, url };
+        if (idx >= 0) appData.media[idx] = { id, source, series, title, date, pastor, url };
       } else {
-        appData.media.push({ id: nextId(appData.media), series, title, date, pastor, url });
+        appData.media.push({ id: nextId(appData.media), source, series, title, date, pastor, url });
       }
       saveData(); closeModal();
     });
@@ -980,7 +1076,7 @@ function openMediaModal(id) {
 }
 
 function deleteMedia(id) {
-  if (!confirm('Delete this sermon?')) return;
+  if (!confirm('Delete this recording?')) return;
   appData.media = appData.media.filter(m => m.id !== id);
   saveData();
 }

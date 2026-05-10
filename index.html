@@ -120,7 +120,7 @@
     <!-- MEDIA TAB -->
     <section class="tab-content" id="tab-media">
       <div class="section-header">
-        <h3 class="section-title">Sermons &amp; Media</h3>
+        <h3 class="section-title">Services &amp; Sermons</h3>
         <button class="section-edit-btn admin-only" id="add-media-btn">+ Add</button>
       </div>
       <div id="media-list" class="card-list"></div>
@@ -149,6 +149,22 @@
         </div>
         <p class="settings-msg" id="settings-profile-msg"></p>
         <button class="form-btn form-btn-primary" id="settings-save-btn">Save Profile</button>
+      </div>
+
+      <h3 class="section-title admin-only" style="margin-top:20px">YouTube Auto-Sync</h3>
+      <div class="admin-only settings-card" style="padding:14px 16px">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px">Connect your YouTube channel — new service recordings will appear in Media automatically.</p>
+        <div class="form-group">
+          <label class="form-label">Channel ID</label>
+          <input class="form-input" id="yt-channel-id" placeholder="UCxxxxxxxxxxxxxxxx" autocapitalize="none" autocorrect="off" spellcheck="false" />
+          <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0">YouTube Studio &rarr; Settings &rarr; Channel &rarr; Advanced settings</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Key</label>
+          <input class="form-input" id="yt-api-key" placeholder="AIzaSy..." autocapitalize="none" autocorrect="off" spellcheck="false" />
+          <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0">Free key at console.cloud.google.com &rarr; Enable YouTube Data API v3 &rarr; Credentials</p>
+        </div>
+        <button class="form-btn form-btn-primary" id="save-yt-btn" style="margin:0">Save &amp; Sync Now</button>
       </div>
 
       <h3 class="section-title admin-only" style="margin-top:20px">Member Accounts</h3>
