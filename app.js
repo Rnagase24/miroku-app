@@ -383,6 +383,13 @@ function showApp(visible) {
     }
     // Mandatory profile completion check (slight delay so the app is fully rendered)
     setTimeout(checkProfileCompletion, 500);
+    // Donations edit button
+    const editDonBtn = document.getElementById('edit-donations-btn');
+    if (editDonBtn) {
+      editDonBtn.replaceWith(editDonBtn.cloneNode(true));
+      document.getElementById('edit-donations-btn').addEventListener('click', openEditDonationsModal);
+    }
+
     // Prayer buttons
     ['prayer-inbox-btn', 'add-prayer-form-btn'].forEach(btnId => {
       const b = document.getElementById(btnId); if (!b) return;
@@ -1295,8 +1302,6 @@ function renderDonations() {
   }
   container.innerHTML = html;
 }
-
-document.getElementById('edit-donations-btn').addEventListener('click', openEditDonationsModal);
 
 function openEditDonationsModal() {
   const d   = appData.donations || DEFAULT_DATA.donations;
