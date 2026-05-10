@@ -126,6 +126,22 @@
       <div id="media-list" class="card-list"></div>
     </section>
 
+    <!-- SOREI-SAISHI TAB -->
+    <section class="tab-content" id="tab-sorei">
+      <div class="section-header" style="margin-top:4px">
+        <h3 class="section-title">Sorei-Saishi</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="section-edit-btn admin-only" id="sorei-reminders-btn">Reminders</button>
+          <button class="section-edit-btn admin-only" id="sorei-rules-btn">Rules</button>
+          <button class="section-edit-btn admin-only" id="add-enrollment-btn">+ Add</button>
+        </div>
+      </div>
+      <div class="search-bar-wrap">
+        <input class="search-bar" id="sorei-search" type="search" placeholder="Search members or ancestors..." />
+      </div>
+      <div id="sorei-list" class="card-list"></div>
+    </section>
+
     <!-- SETTINGS TAB -->
     <section class="tab-content" id="tab-settings">
 
@@ -239,6 +255,10 @@
     <button class="nav-btn" data-tab="media">
       <span class="nav-icon">&#127897;</span>
       <span class="nav-label">Media</span>
+    </button>
+    <button class="nav-btn" data-tab="sorei">
+      <span class="nav-icon">&#128333;</span>
+      <span class="nav-label">Sorei</span>
     </button>
     <button class="nav-btn" data-tab="settings">
       <span class="nav-icon">&#9881;</span>

@@ -151,7 +151,9 @@ const DEFAULT_DATA = {
     { id: 4, source: 'other', series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
   ],
   messages: [],
-  youtube: { channelId: '', apiKey: '' }
+  youtube:    { channelId: '', apiKey: '' },
+  soreiSaishi: [],
+  soreiRules:  ''
 };
 
 // ── Realtime Database layer ──
@@ -174,10 +176,13 @@ function subscribeData() {
       appData.media    = ensureArray(appData.media);
       appData.services = ensureArray(appData.services, DEFAULT_DATA.services);
       appData.messages = ensureArray(appData.messages);
+      appData.soreiSaishi = ensureArray(appData.soreiSaishi);
+      appData.soreiSaishi = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
       if (!appData.youtube)    appData.youtube    = { channelId: '', apiKey: '' };
+      if (appData.soreiRules === undefined) appData.soreiRules = '';
     } else {
       churchRef.set(appData).catch(err => console.error('Init error:', err));
     }
@@ -320,6 +325,25 @@ function showApp(visible) {
       acctBtn.replaceWith(acctBtn.cloneNode(true));
       document.getElementById('manage-accounts-btn').addEventListener('click', openAccountsModal);
     }
+    // Sorei-Saishi buttons
+    ['add-enrollment-btn', 'sorei-rules-btn', 'sorei-reminders-btn'].forEach(btnId => {
+      const b = document.getElementById(btnId);
+      if (!b) return;
+      b.replaceWith(b.cloneNode(true));
+    });
+    const addEnrBtn = document.getElementById('add-enrollment-btn');
+    if (addEnrBtn) addEnrBtn.addEventListener('click', () => openEnrollmentModal(null));
+    const soreiRulesBtn = document.getElementById('sorei-rules-btn');
+    if (soreiRulesBtn) soreiRulesBtn.addEventListener('click', openSoreiRulesModal);
+    const soreiRemBtn = document.getElementById('sorei-reminders-btn');
+    if (soreiRemBtn) soreiRemBtn.addEventListener('click', openRemindersModal);
+
+    const soreiSearch = document.getElementById('sorei-search');
+    if (soreiSearch) {
+      soreiSearch.replaceWith(soreiSearch.cloneNode(true));
+      document.getElementById('sorei-search').addEventListener('input', e => renderSoreiSaishi(e.target.value));
+    }
+
     const ytBtn = document.getElementById('save-yt-btn');
     if (ytBtn) {
       ytBtn.replaceWith(ytBtn.cloneNode(true));
@@ -453,6 +477,7 @@ function renderAll() {
   renderDirectory();
   renderMedia();
   renderYouTubeSettings();
+  renderSoreiSaishi();
 }
 
 // ── DAILY WORD ──
@@ -1127,6 +1152,363 @@ function deleteMedia(id) {
   if (!confirm('Delete this recording?')) return;
   appData.media = appData.media.filter(m => m.id !== id);
   saveData();
+}
+
+// ── SOREI-SAISHI ──
+
+// Returns ISO "YYYY-MM-DD" of next occurrence for an ancestor
+function getSoreiNextDate(anc) {
+  if (!anc.annual) return anc.serviceDate || '';
+  const today = new Date();
+  const y = today.getFullYear();
+  const candidate = new Date(y, (anc.serviceMonth || 1) - 1, anc.serviceDay || 1);
+  if (candidate < today) candidate.setFullYear(y + 1);
+  return candidate.getFullYear() + '-' + String(candidate.getMonth() + 1).padStart(2, '0') + '-' + String(candidate.getDate()).padStart(2, '0');
+}
+
+function getSoreiDaysUntil(anc) {
+  const iso = getSoreiNextDate(anc);
+  if (!iso) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const svc   = new Date(iso + 'T00:00:00');
+  return Math.round((svc - today) / 86400000);
+}
+
+// Returns 'overdue' | 'due' | 'upcoming' | 'past' | null
+function getSoreiStatus(anc) {
+  const days = getSoreiDaysUntil(anc);
+  if (days === null) return null;
+  if (!anc.annual && days < 0) return 'past';
+  if (days < 0) return 'overdue';
+  if (days <= 45) return 'due';
+  return 'upcoming';
+}
+
+// Returns all ancestor-member pairs needing reminders (within 45-day window)
+function getSoreiDueList() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const thisYear = today.getFullYear();
+  const results = [];
+  for (const entry of (appData.soreiSaishi || [])) {
+    for (const anc of (entry.ancestors || [])) {
+      const days = getSoreiDaysUntil(anc);
+      if (days === null || days < 0 || days > 45) continue;
+      // Check if reminder was already sent this cycle
+      if (anc.annual && anc.reminderSentYear === thisYear) continue;
+      if (!anc.annual && anc.reminderSentDate === getSoreiNextDate(anc)) continue;
+      results.push({ entry, anc, days });
+    }
+  }
+  return results;
+}
+
+function soreiDateDisplay(anc) {
+  if (anc.annual) {
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const m = parseInt(anc.serviceMonth, 10);
+    const d = parseInt(anc.serviceDay, 10);
+    return 'Annual: ' + (MONTHS[m - 1] || '?') + ' ' + d;
+  }
+  if (anc.serviceDate) return 'One-time: ' + fromInputDate(anc.serviceDate);
+  return 'No date set';
+}
+
+function renderSoreiSaishi(filter) {
+  const list = document.getElementById('sorei-list');
+  if (!list) return;
+
+  const entries = appData.soreiSaishi || [];
+  const isAdm = isAdmin();
+
+  // Members see only their own enrollment
+  const visible = isAdm
+    ? entries.filter(e => !filter || e.memberName.toLowerCase().includes(filter.toLowerCase()) ||
+        (e.ancestors || []).some(a => a.name.toLowerCase().includes(filter.toLowerCase())))
+    : entries.filter(e => e.memberUsername === (currentUser && currentUser.username));
+
+  // Reminder banner (admin only)
+  let bannerHTML = '';
+  if (isAdm) {
+    const due = getSoreiDueList();
+    if (due.length) {
+      bannerHTML = `
+        <div class="reminder-banner">
+          <div class="reminder-banner-icon">&#9888;&#65039;</div>
+          <div class="reminder-banner-text">
+            <div class="reminder-banner-title">${due.length} reminder${due.length > 1 ? 's' : ''} pending</div>
+            <div class="reminder-banner-sub">Services within the next 45 days</div>
+          </div>
+          <button class="reminder-banner-btn" id="open-reminders-banner-btn">View</button>
+        </div>`;
+    }
+  }
+
+  if (!visible.length) {
+    list.innerHTML = bannerHTML + `<div class="sorei-empty"><div class="sorei-empty-icon">&#128333;</div>${
+      isAdm ? 'No enrollments yet. Tap + Add to enroll a member.' : 'You are not enrolled in Sorei-Saishi yet. Please contact the church.'
+    }</div>`;
+    if (isAdm && bannerHTML) document.getElementById('open-reminders-banner-btn').addEventListener('click', openRemindersModal);
+    return;
+  }
+
+  list.innerHTML = bannerHTML + visible.map(entry => {
+    const ancestors = entry.ancestors || [];
+    const ancsHTML = ancestors.map(anc => {
+      const status = getSoreiStatus(anc);
+      const days   = getSoreiDaysUntil(anc);
+      let badge = anc.annual
+        ? `<span class="ancestor-badge badge-annual">Annual</span>`
+        : `<span class="ancestor-badge badge-onetime">One-time</span>`;
+      if (status === 'due' || status === 'overdue') {
+        badge += ` <span class="ancestor-badge ${status === 'overdue' ? 'badge-overdue' : 'badge-due'}">${
+          status === 'overdue' ? 'Overdue' : days + 'd away'
+        }</span>`;
+      }
+      return `
+        <div class="ancestor-row">
+          <div class="ancestor-row-left">
+            <div class="ancestor-name">${esc(anc.name)}</div>
+            <div class="ancestor-relation">${esc(anc.relation || '')}</div>
+            <div class="ancestor-date">${esc(soreiDateDisplay(anc))}</div>
+            ${badge}
+            ${anc.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(anc.notes)}</div>` : ''}
+          </div>
+          ${isAdm ? `<div class="card-actions" style="display:flex">
+            <button class="card-action-btn" data-edit-anc="${entry.id}" data-anc-idx="${anc.id}">&#9998;</button>
+            <button class="card-action-btn delete" data-del-anc="${entry.id}" data-anc-idx="${anc.id}">&#128465;</button>
+          </div>` : ''}
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="enrollment-card">
+        <div class="enrollment-card-header">
+          <div class="enrollment-avatar">${esc(initials(entry.memberName || '?'))}</div>
+          <div class="enrollment-member-info">
+            <div class="enrollment-member-name">${esc(entry.memberName)}</div>
+            <div class="enrollment-member-email">${esc(entry.memberEmail || '')}${entry.memberPhone ? ' &bull; ' + esc(entry.memberPhone) : ''}</div>
+          </div>
+          ${isAdm ? `<div class="card-actions" style="display:flex;gap:6px">
+            <button class="card-action-btn" data-add-anc="${entry.id}" title="Add ancestor">+</button>
+            <button class="card-action-btn" data-edit-enr="${entry.id}">&#9998;</button>
+            <button class="card-action-btn delete" data-del-enr="${entry.id}">&#128465;</button>
+          </div>` : ''}
+        </div>
+        ${ancsHTML || '<div style="padding:10px 16px;font-size:13px;color:var(--text-muted)">No ancestors added yet.</div>'}
+      </div>`;
+  }).join('');
+
+  // Wire buttons
+  if (isAdm && bannerHTML) {
+    const b = document.getElementById('open-reminders-banner-btn');
+    if (b) b.addEventListener('click', openRemindersModal);
+  }
+
+  document.querySelectorAll('[data-edit-enr]').forEach(b =>
+    b.addEventListener('click', () => openEnrollmentModal(parseInt(b.dataset.editEnr, 10))));
+  document.querySelectorAll('[data-del-enr]').forEach(b =>
+    b.addEventListener('click', () => deleteEnrollment(parseInt(b.dataset.delEnr, 10))));
+  document.querySelectorAll('[data-add-anc]').forEach(b =>
+    b.addEventListener('click', () => openAncestorModal(parseInt(b.dataset.addAnc, 10), null)));
+  document.querySelectorAll('[data-edit-anc]').forEach(b =>
+    b.addEventListener('click', () => openAncestorModal(parseInt(b.dataset.editAnc, 10), parseInt(b.dataset.ancIdx, 10))));
+  document.querySelectorAll('[data-del-anc]').forEach(b =>
+    b.addEventListener('click', () => deleteAncestor(parseInt(b.dataset.delAnc, 10), parseInt(b.dataset.ancIdx, 10))));
+}
+
+function deleteEnrollment(id) {
+  if (!confirm('Remove this member enrollment and all their ancestors?')) return;
+  appData.soreiSaishi = appData.soreiSaishi.filter(e => e.id !== id);
+  saveData();
+}
+
+function deleteAncestor(entryId, ancId) {
+  if (!confirm('Remove this ancestor?')) return;
+  const entry = (appData.soreiSaishi || []).find(e => e.id === entryId);
+  if (!entry) return;
+  entry.ancestors = entry.ancestors.filter(a => a.id !== ancId);
+  saveData();
+}
+
+function openEnrollmentModal(id) {
+  const entry = id ? (appData.soreiSaishi || []).find(e => e.id === id) : null;
+  const users = getUsers();
+  const userOptions = Object.entries(users).map(([u, d]) =>
+    `<option value="${esc(u)}" ${entry && entry.memberUsername === u ? 'selected' : ''}>${esc(d.displayName || u)} (${esc(u)})</option>`
+  ).join('');
+
+  openModal(entry ? 'Edit Enrollment' : 'Add Enrollment', `
+    <div class="form-group"><label class="form-label">Member Name</label>
+      <input class="form-input" id="enr-name" value="${esc(entry ? entry.memberName : '')}" placeholder="Full name" /></div>
+    <div class="form-group"><label class="form-label">Email</label>
+      <input class="form-input" id="enr-email" type="email" value="${esc(entry ? entry.memberEmail || '' : '')}" placeholder="For reminders" /></div>
+    <div class="form-group"><label class="form-label">Phone</label>
+      <input class="form-input" id="enr-phone" type="tel" value="${esc(entry ? entry.memberPhone || '' : '')}" placeholder="(optional)" /></div>
+    <div class="form-group"><label class="form-label">Link to App Account (optional)</label>
+      <select class="form-input" id="enr-username">
+        <option value="">— None —</option>${userOptions}
+      </select></div>
+    <button class="form-btn form-btn-primary" id="save-enr-btn">Save</button>
+  `, () => {
+    document.getElementById('save-enr-btn').addEventListener('click', () => {
+      const memberName     = document.getElementById('enr-name').value.trim();
+      const memberEmail    = document.getElementById('enr-email').value.trim();
+      const memberPhone    = document.getElementById('enr-phone').value.trim();
+      const memberUsername = document.getElementById('enr-username').value;
+      if (!memberName) return;
+      if (!appData.soreiSaishi) appData.soreiSaishi = [];
+      if (id) {
+        const idx = appData.soreiSaishi.findIndex(e => e.id === id);
+        if (idx >= 0) Object.assign(appData.soreiSaishi[idx], { memberName, memberEmail, memberPhone, memberUsername });
+      } else {
+        appData.soreiSaishi.push({ id: nextId(appData.soreiSaishi), memberName, memberEmail, memberPhone, memberUsername, ancestors: [] });
+      }
+      saveData(); closeModal();
+    });
+  });
+}
+
+function openAncestorModal(entryId, ancId) {
+  const entry = (appData.soreiSaishi || []).find(e => e.id === entryId);
+  if (!entry) return;
+  const anc = ancId ? (entry.ancestors || []).find(a => a.id === ancId) : null;
+  const isAnnual = anc ? anc.annual !== false : true;
+
+  openModal(anc ? 'Edit Ancestor' : 'Add Ancestor', `
+    <div class="form-group"><label class="form-label">Ancestor Name</label>
+      <input class="form-input" id="anc-name" value="${esc(anc ? anc.name : '')}" placeholder="Full name" /></div>
+    <div class="form-group"><label class="form-label">Relation</label>
+      <input class="form-input" id="anc-relation" value="${esc(anc ? anc.relation || '' : '')}" placeholder="e.g. Grandfather, Mother" /></div>
+    <div class="form-group"><label class="form-label">Service Type</label>
+      <select class="form-input" id="anc-type">
+        <option value="annual"  ${isAnnual  ? 'selected' : ''}>Annual (repeats every year)</option>
+        <option value="onetime" ${!isAnnual ? 'selected' : ''}>One-time (specific date)</option>
+      </select></div>
+    <div id="anc-annual-fields" style="${isAnnual ? '' : 'display:none'}">
+      <div style="display:flex;gap:8px">
+        <div class="form-group" style="flex:1"><label class="form-label">Month</label>
+          <select class="form-input" id="anc-month">
+            ${['January','February','March','April','May','June','July','August','September','October','November','December'].map((m,i) =>
+              `<option value="${i+1}" ${anc && anc.annual && parseInt(anc.serviceMonth) === i+1 ? 'selected' : ''}>${m}</option>`
+            ).join('')}
+          </select></div>
+        <div class="form-group" style="flex:1"><label class="form-label">Day</label>
+          <input class="form-input" id="anc-day" type="number" min="1" max="31" value="${esc(anc && anc.annual ? anc.serviceDay || '' : '')}" placeholder="15" /></div>
+      </div>
+    </div>
+    <div id="anc-onetime-fields" style="${!isAnnual ? '' : 'display:none'}">
+      <div class="form-group"><label class="form-label">Service Date</label>
+        <input class="form-input" id="anc-date" type="date" value="${esc(anc && !anc.annual ? anc.serviceDate || '' : '')}" /></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes (optional)</label>
+      <textarea class="form-textarea" id="anc-notes" placeholder="Any special notes...">${esc(anc ? anc.notes || '' : '')}</textarea></div>
+    <button class="form-btn form-btn-primary" id="save-anc-btn">Save</button>
+  `, () => {
+    // Toggle annual/one-time fields
+    document.getElementById('anc-type').addEventListener('change', e => {
+      const annual = e.target.value === 'annual';
+      document.getElementById('anc-annual-fields').style.display = annual ? '' : 'none';
+      document.getElementById('anc-onetime-fields').style.display = annual ? 'none' : '';
+    });
+
+    document.getElementById('save-anc-btn').addEventListener('click', () => {
+      const name     = document.getElementById('anc-name').value.trim();
+      const relation = document.getElementById('anc-relation').value.trim();
+      const type     = document.getElementById('anc-type').value;
+      const notes    = document.getElementById('anc-notes').value.trim();
+      if (!name) return;
+
+      let ancData;
+      if (type === 'annual') {
+        ancData = {
+          annual: true,
+          serviceMonth: parseInt(document.getElementById('anc-month').value, 10),
+          serviceDay:   parseInt(document.getElementById('anc-day').value, 10) || 1,
+          serviceDate:  '',
+          reminderSentYear: anc ? (anc.reminderSentYear || 0) : 0
+        };
+      } else {
+        ancData = {
+          annual: false,
+          serviceMonth: 0, serviceDay: 0,
+          serviceDate:  document.getElementById('anc-date').value,
+          reminderSentDate: anc ? (anc.reminderSentDate || '') : ''
+        };
+      }
+
+      if (!entry.ancestors) entry.ancestors = [];
+      if (ancId) {
+        const idx = entry.ancestors.findIndex(a => a.id === ancId);
+        if (idx >= 0) entry.ancestors[idx] = { id: ancId, name, relation, notes, ...ancData };
+      } else {
+        entry.ancestors.push({ id: nextId(entry.ancestors), name, relation, notes, ...ancData });
+      }
+      saveData(); closeModal();
+    });
+  });
+}
+
+function openSoreiRulesModal() {
+  openModal('Sorei-Saishi Rules', `
+    <div class="form-group"><label class="form-label">Rules & Information</label>
+      <textarea class="form-textarea" id="sorei-rules-text" style="min-height:180px" placeholder="Enter the rules and information for Sorei-Saishi here...">${esc(appData.soreiRules || '')}</textarea></div>
+    <button class="form-btn form-btn-primary" id="save-rules-btn">Save</button>
+  `, () => {
+    document.getElementById('save-rules-btn').addEventListener('click', () => {
+      appData.soreiRules = document.getElementById('sorei-rules-text').value.trim();
+      saveData(); closeModal();
+    });
+  });
+}
+
+function openRemindersModal() {
+  const due = getSoreiDueList();
+  const thisYear = new Date().getFullYear();
+
+  const emails = [...new Set(due.map(d => d.entry.memberEmail).filter(Boolean))];
+
+  const itemsHTML = due.length ? due.map(({ entry, anc, days }) => `
+    <div class="reminder-item">
+      <div class="reminder-item-name">${esc(anc.name)} <span style="font-weight:400;color:var(--text-muted)">— ${esc(anc.relation || '')}</span></div>
+      <div class="reminder-item-meta">${esc(soreiDateDisplay(anc))} &bull; <strong>${days === 0 ? 'Today' : days + ' day' + (days !== 1 ? 's' : '') + ' away'}</strong></div>
+      <div class="reminder-item-email">&#9993; ${esc(entry.memberName)} &lt;${esc(entry.memberEmail || 'no email')}&gt;</div>
+    </div>
+  `).join('') : '<p style="color:var(--text-muted);font-size:14px">No reminders due in the next 45 days.</p>';
+
+  openModal('Reminders Due', `
+    ${itemsHTML}
+    ${due.length ? `
+      <div style="margin-top:20px">
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${emails.length} email address${emails.length !== 1 ? 'es' : ''} to notify</p>
+        <button class="form-btn form-btn-primary" id="copy-emails-btn">&#128203; Copy Email List</button>
+        <button class="form-btn" id="mark-sent-btn" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;margin-top:8px">&#10003; Mark All as Sent</button>
+      </div>` : ''}
+  `, () => {
+    const copyBtn = document.getElementById('copy-emails-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(emails.join(', ')).then(() => showToast('Email list copied!', 'info')).catch(() => showToast(emails.join(', '), 'info'));
+      });
+    }
+    const markBtn = document.getElementById('mark-sent-btn');
+    if (markBtn) {
+      markBtn.addEventListener('click', () => {
+        if (!confirm('Mark all pending reminders as sent? This cannot be undone.')) return;
+        const thisYr = new Date().getFullYear();
+        for (const { entry, anc } of due) {
+          const e = appData.soreiSaishi.find(x => x.id === entry.id);
+          if (!e) continue;
+          const a = e.ancestors.find(x => x.id === anc.id);
+          if (!a) continue;
+          if (a.annual) a.reminderSentYear = thisYr;
+          else a.reminderSentDate = a.serviceDate;
+        }
+        saveData();
+        showToast('All reminders marked as sent.', 'info');
+        closeModal();
+      });
+    }
+  });
 }
 
 // ── SETTINGS ──

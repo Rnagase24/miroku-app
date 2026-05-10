@@ -969,3 +969,180 @@ body.is-admin .card-actions { display: flex; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Sorei-Saishi tab ── */
+.enrollment-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  overflow: hidden;
+}
+
+.enrollment-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0e8fb;
+}
+
+.enrollment-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--purple), var(--purple-light));
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.enrollment-member-info { flex: 1; min-width: 0; }
+
+.enrollment-member-name {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  color: var(--text);
+}
+
+.enrollment-member-email {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ancestor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f5f0fb;
+}
+
+.ancestor-row:last-child { border-bottom: none; }
+
+.ancestor-row-left { flex: 1; min-width: 0; }
+
+.ancestor-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ancestor-relation {
+  font-size: 12px;
+  color: var(--purple-light);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.ancestor-date {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ancestor-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-bottom: 3px;
+}
+
+.badge-annual   { background: #eef5ff; color: #2563eb; }
+.badge-onetime  { background: #f0fdf4; color: #15803d; }
+.badge-due      { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+.badge-overdue  { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+
+.reminder-banner {
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reminder-banner-icon { font-size: 24px; flex-shrink: 0; }
+
+.reminder-banner-text { flex: 1; }
+
+.reminder-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c2410c;
+  margin-bottom: 2px;
+}
+
+.reminder-banner-sub {
+  font-size: 12px;
+  color: #9a3412;
+}
+
+.reminder-banner-btn {
+  background: #c2410c;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 8px 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.reminder-item {
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.reminder-item-name {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.reminder-item-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.reminder-item-email {
+  font-size: 12px;
+  color: var(--purple-light);
+  font-weight: 500;
+}
+
+.sorei-rules-card {
+  background: linear-gradient(135deg, #f5f0ff, #ede5f8);
+  border-radius: var(--radius);
+  padding: 16px;
+  border-left: 4px solid var(--purple-light);
+  margin-bottom: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.sorei-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.sorei-empty-icon { font-size: 40px; margin-bottom: 12px; }
