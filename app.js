@@ -323,15 +323,31 @@ function showApp(visible) {
     const ytBtn = document.getElementById('save-yt-btn');
     if (ytBtn) {
       ytBtn.replaceWith(ytBtn.cloneNode(true));
-      document.getElementById('save-yt-btn').addEventListener('click', () => {
-        const channelId = document.getElementById('yt-channel-id').value.trim();
-        const apiKey    = document.getElementById('yt-api-key').value.trim();
-        if (!appData.youtube) appData.youtube = {};
-        appData.youtube.channelId = channelId;
-        appData.youtube.apiKey    = apiKey;
-        saveData();
-        ytSynced = false;
-        refreshYouTube().then(() => showToast('YouTube synced!', 'info'));
+      document.getElementById('save-yt-btn').addEventListener('click', async () => {
+        const raw    = document.getElementById('yt-channel-id').value.trim();
+        const apiKey = document.getElementById('yt-api-key').value.trim();
+        if (!raw || !apiKey) { showToast('Enter your channel URL/handle and API key first.', 'error'); return; }
+        const btn = document.getElementById('save-yt-btn');
+        btn.textContent = 'Resolving…';
+        btn.disabled = true;
+        try {
+          const channelId = await resolveChannelId(raw, apiKey);
+          if (!appData.youtube) appData.youtube = {};
+          appData.youtube.channelId = channelId;
+          appData.youtube.apiKey    = apiKey;
+          // Update the input to show the resolved ID
+          const el = document.getElementById('yt-channel-id');
+          if (el) el.value = channelId;
+          saveData();
+          ytSynced = false;
+          await refreshYouTube();
+          showToast('YouTube connected and synced!', 'info');
+        } catch (err) {
+          showToast('⚠️ ' + (err.message || 'Could not connect to YouTube'), 'error');
+        } finally {
+          btn.textContent = 'Save & Sync Now';
+          btn.disabled = false;
+        }
       });
     }
   } else {
@@ -353,6 +369,38 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 });
 
 // ── YouTube auto-sync ──
+
+async function resolveChannelId(input, apiKey) {
+  const s = input.trim();
+  // Already a Channel ID
+  if (/^UC[\w-]{22}$/.test(s)) return s;
+
+  // Extract from full URL: youtube.com/channel/UCxxx
+  const chanMatch = s.match(/youtube\.com\/channel\/(UC[\w-]{22})/);
+  if (chanMatch) return chanMatch[1];
+
+  // Extract handle: @name from URL or raw @name
+  let handle = null;
+  const handleUrl = s.match(/youtube\.com\/@([\w.-]+)/);
+  if (handleUrl) handle = '@' + handleUrl[1];
+  else if (s.startsWith('@')) handle = s;
+
+  if (handle) {
+    const r = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${encodeURIComponent(apiKey)}`);
+    const j = await r.json();
+    if (j.items && j.items[0]) return j.items[0].id;
+    throw new Error('Channel not found for ' + handle);
+  }
+
+  // Try as legacy username
+  const userMatch = s.match(/youtube\.com\/(?:c\/|user\/)([\w.-]+)/);
+  const username = userMatch ? userMatch[1] : s;
+  const r2 = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=id&forUsername=${encodeURIComponent(username)}&key=${encodeURIComponent(apiKey)}`);
+  const j2 = await r2.json();
+  if (j2.items && j2.items[0]) return j2.items[0].id;
+  throw new Error('Could not resolve channel. Try pasting your full YouTube channel URL.');
+}
+
 async function refreshYouTube() {
   const yt = (appData && appData.youtube) || {};
   if (!yt.channelId || !yt.apiKey) return;
