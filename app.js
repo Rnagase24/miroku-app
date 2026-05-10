@@ -165,8 +165,15 @@ function subscribeData() {
   const handler = snap => {
     if (snap.exists()) {
       appData = snap.val();
+      // Realtime DB stores empty arrays as null and may return objects instead of arrays
+      appData.events   = ensureArray(appData.events);
+      appData.members  = ensureArray(appData.members);
+      appData.media    = ensureArray(appData.media);
+      appData.services = ensureArray(appData.services, DEFAULT_DATA.services);
+      appData.messages = ensureArray(appData.messages);
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
-      if (!appData.messages)   appData.messages   = [];
+      if (!appData.location)   appData.location   = DEFAULT_DATA.location;
+      if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
     } else {
       churchRef.set(appData).catch(err => console.error('Init error:', err));
     }
@@ -198,6 +205,35 @@ function saveData() {
 
 function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
 function nextId(arr) { return arr.length ? Math.max(...arr.map(x => x.id)) + 1 : 1; }
+
+// Firebase Realtime DB returns null for empty arrays; ensure fields are always real arrays
+function ensureArray(val, fallback = []) {
+  if (Array.isArray(val)) return val;
+  if (!val) return fallback;
+  return Object.values(val); // numeric-keyed object → array
+}
+
+// Date helpers for calendar picker ↔ display format
+function toInputDate(displayDate) {
+  // "Sun, May 11" → "2025-05-11"
+  if (!displayDate) return '';
+  const clean = displayDate.replace(/^[A-Za-z]+,\s*/, '');
+  const now = new Date();
+  const d = new Date(clean + ' ' + now.getFullYear());
+  if (isNaN(d.getTime())) return '';
+  if (d < new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)) d.setFullYear(now.getFullYear() + 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function fromInputDate(isoDate) {
+  // "2025-05-11" → "Sun, May 11"
+  if (!isoDate) return '';
+  const [y, m, day] = isoDate.split('-').map(Number);
+  const dt = new Date(y, m - 1, day);
+  const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return DAYS[dt.getDay()] + ', ' + MONTHS[dt.getMonth()] + ' ' + dt.getDate();
+}
 
 // ── XSS helpers ──
 function esc(str) {
@@ -762,7 +798,7 @@ function openEventModal(id) {
   const ev = id ? appData.events.find(e => e.id === id) : null;
   openModal(ev ? 'Edit Event' : 'Add Event', `
     <div class="form-group"><label class="form-label">Date</label>
-      <input class="form-input" id="f-date" value="${esc(ev ? ev.date : '')}" placeholder="e.g. Sun, Jun 1" /></div>
+      <input class="form-input" id="f-date" type="date" value="${esc(ev ? toInputDate(ev.date) : '')}" /></div>
     <div class="form-group"><label class="form-label">Title</label>
       <input class="form-input" id="f-title" value="${esc(ev ? ev.title : '')}" placeholder="Event title" /></div>
     <div class="form-group"><label class="form-label">Description</label>
@@ -773,7 +809,7 @@ function openEventModal(id) {
     ${ev ? '<button class="form-btn form-btn-danger" id="del-event-btn">Delete Event</button>' : ''}
   `, () => {
     document.getElementById('save-event-btn').addEventListener('click', () => {
-      const date = document.getElementById('f-date').value.trim();
+      const date = fromInputDate(document.getElementById('f-date').value);
       const title = document.getElementById('f-title').value.trim();
       const desc = document.getElementById('f-desc').value.trim();
       const tag = document.getElementById('f-tag').value.trim();
