@@ -19,13 +19,37 @@
     <div class="login-card">
       <div class="login-logo"><img src="logo.svg" alt="Miroku LA Church" /></div>
       <h2 class="login-church-name">Miroku LA Church</h2>
-      <p class="login-tagline">Sign in to continue</p>
-      <form id="login-form">
-        <input class="login-input" id="login-username" type="text" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" />
-        <input class="login-input" id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" />
-        <p class="login-error" id="login-error"></p>
-        <button class="login-btn" type="submit">Sign In</button>
-      </form>
+
+      <!-- Sign In View -->
+      <div id="signin-view">
+        <p class="login-tagline">Sign in to continue</p>
+        <form id="login-form">
+          <input class="login-input" id="login-username" type="text" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" />
+          <input class="login-input" id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" />
+          <p class="login-error" id="login-error"></p>
+          <button class="login-btn" type="submit">Sign In</button>
+        </form>
+        <p class="login-switch">New member? <button class="login-switch-btn" id="show-signup-btn" type="button">Create an account</button></p>
+      </div>
+
+      <!-- Sign Up View -->
+      <div id="signup-view" class="hidden">
+        <p class="login-tagline">Create your account</p>
+        <form id="signup-form">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <input class="login-input" id="signup-first" placeholder="First name" autocomplete="given-name" />
+            <input class="login-input" id="signup-last"  placeholder="Last name"  autocomplete="family-name" />
+          </div>
+          <input class="login-input" id="signup-username" type="text"  placeholder="Choose a username" autocomplete="username" autocapitalize="none" autocorrect="off" />
+          <input class="login-input" id="signup-email"    type="email" placeholder="Email (for reminders)" autocomplete="email" />
+          <input class="login-input" id="signup-phone"    type="tel"   placeholder="Phone number" autocomplete="tel" />
+          <input class="login-input" id="signup-password" type="password" placeholder="Password (min 6 characters)" autocomplete="new-password" />
+          <input class="login-input" id="signup-confirm"  type="password" placeholder="Confirm password" autocomplete="new-password" />
+          <p class="login-error" id="signup-error"></p>
+          <button class="login-btn" type="submit">Create Account</button>
+        </form>
+        <p class="login-switch">Already have an account? <button class="login-switch-btn" id="show-signin-btn" type="button">Sign in</button></p>
+      </div>
     </div>
   </div>
 

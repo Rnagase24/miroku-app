@@ -354,6 +354,85 @@ document.getElementById('login-form').addEventListener('submit', async e => {
   }
 });
 
+// ── Sign Up ──
+document.getElementById('show-signup-btn').addEventListener('click', () => {
+  document.getElementById('signin-view').classList.add('hidden');
+  document.getElementById('signup-view').classList.remove('hidden');
+  document.getElementById('signup-error').textContent = '';
+  document.getElementById('signup-first').focus();
+});
+
+document.getElementById('show-signin-btn').addEventListener('click', () => {
+  document.getElementById('signup-view').classList.add('hidden');
+  document.getElementById('signin-view').classList.remove('hidden');
+  document.getElementById('login-error').textContent = '';
+});
+
+document.getElementById('signup-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const firstName = document.getElementById('signup-first').value.trim();
+  const lastName  = document.getElementById('signup-last').value.trim();
+  const rawUser   = document.getElementById('signup-username').value.trim();
+  const username  = rawUser.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9._-]/g, '');
+  const email     = document.getElementById('signup-email').value.trim();
+  const phone     = document.getElementById('signup-phone').value.trim();
+  const password  = document.getElementById('signup-password').value;
+  const confirm   = document.getElementById('signup-confirm').value;
+  const errEl     = document.getElementById('signup-error');
+  const btn       = document.querySelector('#signup-form button[type="submit"]');
+
+  errEl.textContent = '';
+  if (!firstName || !lastName) { errEl.textContent = 'First and last name are required.'; return; }
+  if (!username)               { errEl.textContent = 'Please choose a username (letters, numbers, dots).'; return; }
+  if (!password)               { errEl.textContent = 'Please choose a password.'; return; }
+  if (password.length < 6)    { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  if (password !== confirm)   { errEl.textContent = 'Passwords do not match.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Creating account…';
+
+  try {
+    // Always fetch the latest accounts from Firebase before checking uniqueness
+    await loadUsersFromFirestore();
+    const users = getUsers();
+
+    if (users[username]) {
+      errEl.textContent = 'That username is already taken — please choose another.';
+      return;
+    }
+
+    users[username] = {
+      password,
+      role:            'member',
+      displayName:     firstName + ' ' + lastName,
+      firstName,
+      lastName,
+      email,
+      phone,
+      address:         '',
+      profileComplete: true,
+      lastSeen:        new Date().toISOString()
+    };
+    saveUsers(users);
+
+    if (login(username, password)) {
+      // Clear all signup fields
+      ['signup-first','signup-last','signup-username','signup-email','signup-phone','signup-password','signup-confirm']
+        .forEach(id => { document.getElementById(id).value = ''; });
+      await storeCredential(username, password);
+      showApp(true);
+      logSignIn();
+      showToast('Welcome, ' + firstName + '! Your account is ready.', 'info');
+    }
+  } catch (err) {
+    errEl.textContent = 'Error creating account — check your connection and try again.';
+    console.error('Signup error:', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Account';
+  }
+});
+
 // ── Show / hide app ──
 function showApp(visible) {
   document.getElementById('login-screen').classList.toggle('hidden', visible);
@@ -452,6 +531,10 @@ function showApp(visible) {
   } else {
     document.body.classList.remove('is-admin');
     document.getElementById('login-username').value = '';
+    // Always return to sign-in view on logout
+    document.getElementById('signin-view').classList.remove('hidden');
+    document.getElementById('signup-view').classList.add('hidden');
+    document.getElementById('login-error').textContent = '';
   }
 }
 
