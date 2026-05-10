@@ -187,9 +187,20 @@ const DEFAULT_DATA = {
     { id: 4, source: 'other', series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
   ],
   messages: [],
-  youtube:    { channelId: '', apiKey: '' },
-  soreiSaishi: [],
-  soreiRules:  ''
+  youtube:      { channelId: '', apiKey: '' },
+  soreiSaishi:  [],
+  soreiRules:   '',
+  donations: {
+    message: 'Thank you for your generous giving! Every contribution supports our ministry.',
+    paypal:  { enabled: false, link: '', note: '' },
+    zelle:   { enabled: false, info: '', note: '' },
+    venmo:   { enabled: false, handle: '', note: '' }
+  },
+  prayerForms: [
+    { id: 1, type: 'daily',     title: 'Daily Prayer',                       description: 'Share your heart. Our prayer team prays over every request submitted here.',                              active: true, fixed: true },
+    { id: 2, type: 'ancestors', title: 'Prayer Request for My Ancestors',     description: 'Request prayers for your ancestors and loved ones who have passed. Our ministers will hold them in prayer.', active: true, fixed: true }
+  ],
+  prayerRequests: []
 };
 
 // ── Realtime Database layer ──
@@ -212,12 +223,15 @@ function subscribeData() {
       appData.media    = ensureArray(appData.media);
       appData.services = ensureArray(appData.services, DEFAULT_DATA.services);
       appData.messages = ensureArray(appData.messages);
-      appData.soreiSaishi = ensureArray(appData.soreiSaishi);
-      appData.soreiSaishi = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
+      appData.soreiSaishi    = ensureArray(appData.soreiSaishi);
+      appData.soreiSaishi    = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
+      appData.prayerForms    = ensureArray(appData.prayerForms,    DEFAULT_DATA.prayerForms);
+      appData.prayerRequests = ensureArray(appData.prayerRequests);
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
       if (!appData.youtube)    appData.youtube    = { channelId: '', apiKey: '' };
+      if (!appData.donations)  appData.donations  = DEFAULT_DATA.donations;
       if (appData.soreiRules === undefined) appData.soreiRules = '';
     } else {
       churchRef.set(appData).catch(err => console.error('Init error:', err));
@@ -369,6 +383,16 @@ function showApp(visible) {
     }
     // Mandatory profile completion check (slight delay so the app is fully rendered)
     setTimeout(checkProfileCompletion, 500);
+    // Prayer buttons
+    ['prayer-inbox-btn', 'add-prayer-form-btn'].forEach(btnId => {
+      const b = document.getElementById(btnId); if (!b) return;
+      b.replaceWith(b.cloneNode(true));
+    });
+    const pInboxBtn = document.getElementById('prayer-inbox-btn');
+    if (pInboxBtn) pInboxBtn.addEventListener('click', openPrayerInboxModal);
+    const addPfBtn = document.getElementById('add-prayer-form-btn');
+    if (addPfBtn) addPfBtn.addEventListener('click', () => openPrayerFormEditor(null));
+
     // Sorei-Saishi buttons
     ['add-enrollment-btn', 'sorei-rules-btn', 'sorei-reminders-btn'].forEach(btnId => {
       const b = document.getElementById(btnId);
@@ -521,6 +545,8 @@ function renderAll() {
   renderDirectory();
   renderMedia();
   renderYouTubeSettings();
+  renderDonations();
+  renderPrayer();
   renderSoreiSaishi();
 }
 
@@ -1230,6 +1256,260 @@ function openMediaModal(id) {
 function deleteMedia(id) {
   if (!confirm('Delete this recording?')) return;
   appData.media = appData.media.filter(m => m.id !== id);
+  saveData();
+}
+
+// ── DONATIONS ──
+const DONATION_METHODS = [
+  { key: 'paypal', label: 'PayPal', color: '#003087', bg: '#e8f0ff', getLink: d => d.link || '', getInfo: d => d.link ? d.link.replace(/^https?:\/\//, '') : '', btnLabel: 'Donate via PayPal' },
+  { key: 'zelle',  label: 'Zelle',  color: '#6d1ed4', bg: '#f3eeff', getLink: () => '',           getInfo: d => d.info || '',                                    btnLabel: '' },
+  { key: 'venmo',  label: 'Venmo',  color: '#3d95ce', bg: '#e8f5ff', getLink: d => d.handle ? 'https://venmo.com/' + d.handle.replace(/^@/, '') : '', getInfo: d => d.handle ? ('@' + d.handle.replace(/^@/, '')) : '', btnLabel: 'Open Venmo' }
+];
+
+function renderDonations() {
+  const container = document.getElementById('donations-container');
+  if (!container) return;
+  const d = appData.donations || DEFAULT_DATA.donations;
+  const active = DONATION_METHODS.filter(m => { const md = d[m.key] || {}; return md.enabled && (m.getInfo(md) || m.getLink(md)); });
+
+  let html = `<div class="donation-hero"><div class="donation-hero-icon">&#128591;</div><p class="donation-hero-text">${esc(d.message || DEFAULT_DATA.donations.message)}</p></div>`;
+
+  if (!active.length) {
+    html += `<p style="text-align:center;color:var(--text-muted);font-size:14px;padding:24px 0">${
+      isAdmin() ? 'No payment methods enabled yet. Tap Edit to configure.' : 'Please contact the church office for giving information.'
+    }</p>`;
+  } else {
+    html += active.map(method => {
+      const md   = d[method.key] || {};
+      const link = method.getLink(md);
+      const info = method.getInfo(md);
+      return `
+        <div class="donation-card" style="border-top:4px solid ${method.color}">
+          <div class="donation-method-label" style="color:${method.color}">${method.label}</div>
+          ${info ? `<div class="donation-info">${esc(info)}</div>` : ''}
+          ${md.note ? `<div class="donation-note">${esc(md.note)}</div>` : ''}
+          ${method.key === 'zelle' && !link ? `<p class="donation-note" style="margin-top:6px">Open your bank app and send to the phone/email above using Zelle.</p>` : ''}
+          ${link ? `<a class="donation-btn" href="${esc(link)}" target="_blank" style="background:${method.color}">${method.btnLabel}</a>` : ''}
+        </div>`;
+    }).join('');
+  }
+  container.innerHTML = html;
+}
+
+document.getElementById('edit-donations-btn').addEventListener('click', openEditDonationsModal);
+
+function openEditDonationsModal() {
+  const d   = appData.donations || DEFAULT_DATA.donations;
+  const val = (key, field) => esc((d[key] && d[key][field]) || '');
+  const chk = key => (d[key] && d[key].enabled) ? 'checked' : '';
+  openModal('Edit Giving Methods', `
+    <div class="form-group"><label class="form-label">Message to Members</label>
+      <textarea class="form-textarea" id="don-msg" style="min-height:60px">${esc(d.message || DEFAULT_DATA.donations.message)}</textarea></div>
+
+    <div class="donation-edit-section">
+      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
+        <div class="toggle-info"><div class="toggle-title">&#128153; PayPal</div></div>
+        <label class="toggle-switch"><input type="checkbox" id="don-paypal-on" ${chk('paypal')} /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="form-group"><label class="form-label">PayPal.me Link</label>
+        <input class="form-input" id="don-paypal-link" value="${val('paypal','link')}" placeholder="https://paypal.me/YourName" /></div>
+      <div class="form-group"><label class="form-label">Note (optional)</label>
+        <input class="form-input" id="don-paypal-note" value="${val('paypal','note')}" placeholder="e.g. Include your name in the note" /></div>
+    </div>
+
+    <div class="donation-edit-section">
+      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
+        <div class="toggle-info"><div class="toggle-title">&#128156; Zelle</div></div>
+        <label class="toggle-switch"><input type="checkbox" id="don-zelle-on" ${chk('zelle')} /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="form-group"><label class="form-label">Phone or Email</label>
+        <input class="form-input" id="don-zelle-info" value="${val('zelle','info')}" placeholder="(555) 555-0100 or info@church.org" /></div>
+      <div class="form-group"><label class="form-label">Note (optional)</label>
+        <input class="form-input" id="don-zelle-note" value="${val('zelle','note')}" placeholder="e.g. Include your name in the memo" /></div>
+    </div>
+
+    <div class="donation-edit-section">
+      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
+        <div class="toggle-info"><div class="toggle-title">&#128184; Venmo</div></div>
+        <label class="toggle-switch"><input type="checkbox" id="don-venmo-on" ${chk('venmo')} /><span class="toggle-slider"></span></label>
+      </div>
+      <div class="form-group"><label class="form-label">Venmo @handle</label>
+        <input class="form-input" id="don-venmo-handle" value="${val('venmo','handle')}" placeholder="@ChurchName" autocapitalize="none" /></div>
+      <div class="form-group"><label class="form-label">Note (optional)</label>
+        <input class="form-input" id="don-venmo-note" value="${val('venmo','note')}" placeholder="e.g. Write 'Tithe' or 'Offering'" /></div>
+    </div>
+
+    <button class="form-btn form-btn-primary" id="save-donations-btn">Save</button>
+  `, () => {
+    document.getElementById('save-donations-btn').addEventListener('click', () => {
+      if (!appData.donations) appData.donations = {};
+      appData.donations.message = document.getElementById('don-msg').value.trim() || DEFAULT_DATA.donations.message;
+      appData.donations.paypal  = { enabled: document.getElementById('don-paypal-on').checked, link:   document.getElementById('don-paypal-link').value.trim(), note: document.getElementById('don-paypal-note').value.trim() };
+      appData.donations.zelle   = { enabled: document.getElementById('don-zelle-on').checked,  info:   document.getElementById('don-zelle-info').value.trim(),  note: document.getElementById('don-zelle-note').value.trim() };
+      appData.donations.venmo   = { enabled: document.getElementById('don-venmo-on').checked,  handle: document.getElementById('don-venmo-handle').value.trim().replace(/^@+/, ''), note: document.getElementById('don-venmo-note').value.trim() };
+      saveData(); closeModal();
+    });
+  });
+}
+
+// ── PRAYER REQUESTS ──
+function renderPrayer() {
+  const list = document.getElementById('prayer-forms-list');
+  if (!list) return;
+  const forms = ensureArray(appData.prayerForms, DEFAULT_DATA.prayerForms)
+    .filter(f => f.active !== false || isAdmin());
+
+  if (!forms.length) {
+    list.innerHTML = '<p style="color:var(--text-muted)">No prayer forms available.</p>';
+    return;
+  }
+
+  list.innerHTML = forms.map(form => `
+    <div class="prayer-form-card" data-open-form="${form.id}">
+      <div class="prayer-form-icon">${form.type === 'ancestors' ? '&#9729;&#65039;' : '&#128591;'}</div>
+      <div class="prayer-form-body">
+        <div class="prayer-form-title">${esc(form.title)}</div>
+        <div class="prayer-form-desc">${esc(form.description)}</div>
+        ${!form.active ? '<span class="prayer-inactive-badge">Inactive</span>' : ''}
+      </div>
+      <div class="prayer-form-arrow">&#8250;</div>
+      ${isAdmin() && !form.fixed ? `<div class="prayer-admin-btns">
+        <button class="card-action-btn" data-edit-pf="${form.id}">&#9998;</button>
+        <button class="card-action-btn delete" data-del-pf="${form.id}">&#128465;</button>
+      </div>` : ''}
+    </div>`).join('');
+
+  list.querySelectorAll('[data-open-form]').forEach(card =>
+    card.addEventListener('click', e => {
+      if (e.target.closest('[data-edit-pf],[data-del-pf]')) return;
+      openPrayerSubmitModal(parseInt(card.dataset.openForm, 10));
+    }));
+  list.querySelectorAll('[data-edit-pf]').forEach(b =>
+    b.addEventListener('click', () => openPrayerFormEditor(parseInt(b.dataset.editPf, 10))));
+  list.querySelectorAll('[data-del-pf]').forEach(b =>
+    b.addEventListener('click', () => deletePrayerForm(parseInt(b.dataset.delPf, 10))));
+}
+
+function openPrayerSubmitModal(formId) {
+  const forms = ensureArray(appData.prayerForms, DEFAULT_DATA.prayerForms);
+  const form  = forms.find(f => f.id === formId);
+  if (!form) return;
+
+  const users = getUsers();
+  const user  = currentUser ? users[currentUser.username] : null;
+  const fullName = user && (user.firstName || user.lastName)
+    ? ((user.firstName || '') + ' ' + (user.lastName || '')).trim()
+    : (currentUser ? currentUser.displayName || '' : '');
+
+  const ancestorField = form.type === 'ancestors' ? `
+    <div class="form-group"><label class="form-label">Ancestor Name(s)</label>
+      <input class="form-input" id="pr-ancestors" placeholder="Name(s) of your ancestors" /></div>` : '';
+
+  openModal(form.title, `
+    <p style="font-size:14px;color:var(--text-muted);line-height:1.5;margin-bottom:16px">${esc(form.description)}</p>
+    <div class="form-group"><label class="form-label">Your Name</label>
+      <input class="form-input" id="pr-name" value="${esc(fullName)}" placeholder="Your full name" /></div>
+    ${ancestorField}
+    <div class="form-group"><label class="form-label">Prayer Request</label>
+      <textarea class="form-textarea" id="pr-text" style="min-height:120px" placeholder="Share your prayer request here..."></textarea></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">&#128274; Your request is received privately by our prayer team.</p>
+    <button class="form-btn form-btn-primary" id="submit-prayer-btn">&#128591; Submit Prayer Request</button>
+  `, () => {
+    document.getElementById('submit-prayer-btn').addEventListener('click', () => {
+      const name      = document.getElementById('pr-name').value.trim();
+      const text      = document.getElementById('pr-text').value.trim();
+      const ancestors = form.type === 'ancestors' ? (document.getElementById('pr-ancestors') || {}).value || '' : '';
+      if (!name || !text) { showToast('Please enter your name and prayer request.', 'error'); return; }
+      if (!appData.prayerRequests) appData.prayerRequests = [];
+      appData.prayerRequests.push({
+        id:             nextId(appData.prayerRequests),
+        formId:         form.id,
+        formTitle:      form.title,
+        memberUsername: currentUser ? currentUser.username : '',
+        memberName:     name,
+        ancestorNames:  ancestors.trim(),
+        prayerText:     text,
+        submittedAt:    new Date().toISOString()
+      });
+      saveData();
+      closeModal();
+      showToast('Your prayer request has been submitted. God bless you!', 'info');
+    });
+  });
+}
+
+function openPrayerInboxModal() {
+  const requests = ensureArray(appData.prayerRequests)
+    .slice().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+
+  if (!requests.length) {
+    openModal('Prayer Inbox', '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:24px 0">No prayer requests yet.</p>', () => {});
+    return;
+  }
+
+  // Group by form
+  const groups = {};
+  for (const req of requests) {
+    const k = req.formTitle || 'General';
+    if (!groups[k]) groups[k] = [];
+    groups[k].push(req);
+  }
+
+  let html = `<p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">${requests.length} total request${requests.length !== 1 ? 's' : ''} (newest first)</p>`;
+  for (const [title, items] of Object.entries(groups)) {
+    html += `<p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin:16px 0 8px">${esc(title)} (${items.length})</p>`;
+    html += items.map(req => {
+      const d = new Date(req.submittedAt);
+      return `<div class="prayer-inbox-item">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          <span class="prayer-inbox-name">${esc(req.memberName)}</span>
+          <span class="prayer-inbox-date">${d.toLocaleDateString()}</span>
+        </div>
+        ${req.ancestorNames ? `<div style="font-size:12px;color:var(--purple-light);margin-bottom:4px">&#9729;&#65039; ${esc(req.ancestorNames)}</div>` : ''}
+        <div class="prayer-inbox-text">${esc(req.prayerText)}</div>
+      </div>`;
+    }).join('');
+  }
+  openModal('Prayer Inbox', html, () => {});
+}
+
+function openPrayerFormEditor(id) {
+  const forms = ensureArray(appData.prayerForms, DEFAULT_DATA.prayerForms);
+  const form  = id ? forms.find(f => f.id === id) : null;
+  openModal(form ? 'Edit Prayer Form' : 'New Prayer Form', `
+    <div class="form-group"><label class="form-label">Title *</label>
+      <input class="form-input" id="pf-title" value="${esc(form ? form.title : '')}" placeholder="e.g. Spring Service Prayer" /></div>
+    <div class="form-group"><label class="form-label">Description</label>
+      <textarea class="form-textarea" id="pf-desc" style="min-height:80px" placeholder="Describe what this form is for, what to include, etc.">${esc(form ? form.description : '')}</textarea></div>
+    <div class="settings-toggle-row" style="margin-bottom:16px">
+      <div class="toggle-info"><div class="toggle-title">Active (visible to members)</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="pf-active" ${(!form || form.active !== false) ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <button class="form-btn form-btn-primary" id="save-pf-btn">Save Form</button>
+  `, () => {
+    document.getElementById('save-pf-btn').addEventListener('click', () => {
+      const title  = document.getElementById('pf-title').value.trim();
+      const desc   = document.getElementById('pf-desc').value.trim();
+      const active = document.getElementById('pf-active').checked;
+      if (!title) return;
+      if (!appData.prayerForms) appData.prayerForms = [...DEFAULT_DATA.prayerForms];
+      if (id) {
+        const idx = appData.prayerForms.findIndex(f => f.id === id);
+        if (idx >= 0) Object.assign(appData.prayerForms[idx], { title, description: desc, active });
+      } else {
+        appData.prayerForms.push({ id: nextId(appData.prayerForms), type: 'custom', title, description: desc, active, fixed: false });
+      }
+      saveData(); closeModal();
+    });
+  });
+}
+
+function deletePrayerForm(id) {
+  if (!confirm('Delete this prayer form? Existing submissions in the inbox are kept.')) return;
+  appData.prayerForms = ensureArray(appData.prayerForms, DEFAULT_DATA.prayerForms).filter(f => f.id !== id);
   saveData();
 }
 
