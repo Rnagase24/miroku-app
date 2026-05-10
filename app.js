@@ -11,9 +11,10 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
-const churchRef   = db.ref('church/data');
-const settingsRef = db.ref('church/settings');
-const accountsRef = db.ref('church/accounts');
+const churchRef    = db.ref('church/data');
+const settingsRef  = db.ref('church/settings');
+const accountsRef  = db.ref('church/accounts');
+const signinLogRef = db.ref('church/signinLog');
 
 // ── Auth ──
 const SESSION_KEY = 'miroku-session';
@@ -71,6 +72,41 @@ function showToast(msg, type = 'info') {
   el.textContent = msg;
   document.body.appendChild(el);
   setTimeout(() => { if (el.parentNode) el.remove(); }, 6000);
+}
+
+function formatLastSeen(iso) {
+  if (!iso) return 'Never signed in';
+  const d    = new Date(iso);
+  const diff = Math.floor((Date.now() - d) / 1000);
+  if (diff < 60)   return 'Just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function logSignIn() {
+  if (!currentUser) return;
+  const now   = new Date().toISOString();
+  const users = getUsers();
+  if (users && users[currentUser.username]) {
+    users[currentUser.username].lastSeen = now;
+    saveUsers(users);
+  }
+  signinLogRef.push({
+    username:    currentUser.username,
+    displayName: currentUser.displayName || currentUser.username,
+    timestamp:   now
+  }).catch(() => {});
+}
+
+function checkProfileCompletion() {
+  if (!currentUser) return;
+  const users = getUsers();
+  const user  = users[currentUser.username];
+  if (user && user.profileComplete !== true) {
+    openMandatoryProfileModal(user);
+  }
 }
 
 let currentUser = null;
@@ -277,12 +313,12 @@ async function storeCredential(username, password) {
 async function tryAutoLogin() {
   await loadUsersFromFirestore(); // sync accounts from Firestore before checking credentials
 
-  if (checkSession()) { showApp(true); return; }
+  if (checkSession()) { showApp(true); logSignIn(); return; }
 
   if (!('credentials' in navigator) || !window.PasswordCredential) return;
   try {
     const cred = await navigator.credentials.get({ password: true, mediation: 'silent' });
-    if (cred && login(cred.id, cred.password)) showApp(true);
+    if (cred && login(cred.id, cred.password)) { showApp(true); logSignIn(); }
   } catch {}
 }
 
@@ -295,8 +331,9 @@ document.getElementById('login-form').addEventListener('submit', async e => {
   if (login(username, password)) {
     errEl.textContent = '';
     document.getElementById('login-password').value = '';
-    await storeCredential(username, password); // offer to save / Face ID
+    await storeCredential(username, password);
     showApp(true);
+    logSignIn();
   } else {
     errEl.textContent = 'Incorrect username or password.';
     document.getElementById('login-password').value = '';
@@ -325,6 +362,13 @@ function showApp(visible) {
       acctBtn.replaceWith(acctBtn.cloneNode(true));
       document.getElementById('manage-accounts-btn').addEventListener('click', openAccountsModal);
     }
+    const logBtn = document.getElementById('signin-log-btn');
+    if (logBtn) {
+      logBtn.replaceWith(logBtn.cloneNode(true));
+      document.getElementById('signin-log-btn').addEventListener('click', openSigninLogModal);
+    }
+    // Mandatory profile completion check (slight delay so the app is fully rendered)
+    setTimeout(checkProfileCompletion, 500);
     // Sorei-Saishi buttons
     ['add-enrollment-btn', 'sorei-rules-btn', 'sorei-reminders-btn'].forEach(btnId => {
       const b = document.getElementById(btnId);
@@ -637,14 +681,23 @@ function openAccountsModal() {
   openModal('Member Accounts', `
     <div style="margin-bottom:20px">
       ${list.map(u => `
-        <div class="scheduled-msg-row">
-          <div class="scheduled-msg-info">
-            <div class="scheduled-msg-date">${esc(u.username)} &bull; <span style="text-transform:capitalize">${esc(u.role)}</span></div>
-            <div class="scheduled-msg-preview">${esc(u.displayName || u.username)}</div>
+        <div class="scheduled-msg-row" style="flex-direction:column;align-items:stretch;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+            <div class="scheduled-msg-info">
+              <div class="scheduled-msg-date">${esc(u.username)} &bull; <span style="text-transform:capitalize">${esc(u.role)}</span>
+                ${u.profileComplete ? ' &bull; <span style="color:#15803d">&#10003; Profile set</span>' : ' &bull; <span style="color:#c2410c">Profile pending</span>'}
+              </div>
+              <div class="scheduled-msg-preview">${esc(u.displayName || u.username)}</div>
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="card-action-btn" data-edit-acct="${esc(u.username)}">&#9998;</button>
+              ${u.username !== currentUser.username ? `<button class="card-action-btn delete" data-del-acct="${esc(u.username)}">&#128465;</button>` : ''}
+            </div>
           </div>
-          <div style="display:flex;gap:6px;flex-shrink:0">
-            <button class="card-action-btn" data-edit-acct="${esc(u.username)}">&#9998;</button>
-            ${u.username !== currentUser.username ? `<button class="card-action-btn delete" data-del-acct="${esc(u.username)}">&#128465;</button>` : ''}
+          <div style="font-size:11px;color:var(--text-muted)">
+            &#128336; ${esc(formatLastSeen(u.lastSeen))}
+            ${u.phone ? ' &bull; &#128222; ' + esc(u.phone) : ''}
+            ${u.address ? ' &bull; &#128205; ' + esc(u.address) : ''}
           </div>
         </div>`).join('')}
     </div>
@@ -723,6 +776,32 @@ function openEditAccountModal(username) {
       openAccountsModal();
     });
     document.getElementById('ea-back').addEventListener('click', openAccountsModal);
+  });
+}
+
+function openSigninLogModal() {
+  openModal('Sign-in Log', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  signinLogRef.orderByChild('timestamp').limitToLast(60).once('value').then(snap => {
+    const entries = [];
+    snap.forEach(child => entries.unshift(child.val()));
+    if (!entries.length) {
+      document.getElementById('modal-body').innerHTML = '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:20px 0;">No sign-in history yet.</p>';
+      return;
+    }
+    document.getElementById('modal-body').innerHTML = `
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Last ${entries.length} sign-in${entries.length !== 1 ? 's' : ''} (most recent first)</p>
+      ${entries.map(e => {
+        const d = new Date(e.timestamp);
+        return `
+          <div class="scheduled-msg-row" style="margin-bottom:6px">
+            <div class="scheduled-msg-info">
+              <div class="scheduled-msg-date">${esc(e.displayName || e.username)} &bull; ${esc(e.username)}</div>
+              <div class="scheduled-msg-preview">${d.toLocaleString()}</div>
+            </div>
+          </div>`;
+      }).join('')}`;
+  }).catch(() => {
+    document.getElementById('modal-body').innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load sign-in log. Check database rules.</p>';
   });
 }
 
@@ -1511,27 +1590,104 @@ function openRemindersModal() {
   });
 }
 
+// ── MANDATORY PROFILE SETUP ──
+function openMandatoryProfileModal(user) {
+  let overlay = document.getElementById('profile-setup-overlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'profile-setup-overlay';
+  overlay.className = 'profile-setup-overlay';
+  overlay.innerHTML = `
+    <div class="profile-setup-card">
+      <div class="profile-setup-logo"><img src="logo.svg" alt="Miroku LA Church" /></div>
+      <h2 class="profile-setup-title">Welcome! Set Up Your Profile</h2>
+      <p class="profile-setup-sub">Please fill in your details and create a personal password before continuing.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group">
+          <label class="form-label">First Name *</label>
+          <input class="form-input" id="ps-first" value="${esc(user && user.firstName || '')}" placeholder="First name" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Last Name *</label>
+          <input class="form-input" id="ps-last" value="${esc(user && user.lastName || '')}" placeholder="Last name" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Address</label>
+        <input class="form-input" id="ps-address" value="${esc(user && user.address || '')}" placeholder="Street address" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone *</label>
+        <input class="form-input" id="ps-phone" type="tel" value="${esc(user && user.phone || '')}" placeholder="(555) 555-5555" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password *</label>
+        <input class="form-input" id="ps-pw" type="password" placeholder="Create a personal password (min 6 chars)" autocomplete="new-password" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password *</label>
+        <input class="form-input" id="ps-pw2" type="password" placeholder="Repeat your password" autocomplete="new-password" />
+      </div>
+      <p class="settings-msg error" id="ps-msg" style="margin-bottom:8px"></p>
+      <button class="form-btn form-btn-primary" id="ps-save-btn">Save &amp; Continue</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('ps-save-btn').addEventListener('click', () => {
+    const firstName = document.getElementById('ps-first').value.trim();
+    const lastName  = document.getElementById('ps-last').value.trim();
+    const address   = document.getElementById('ps-address').value.trim();
+    const phone     = document.getElementById('ps-phone').value.trim();
+    const pw        = document.getElementById('ps-pw').value;
+    const pw2       = document.getElementById('ps-pw2').value;
+    const msgEl     = document.getElementById('ps-msg');
+
+    if (!firstName || !lastName) { msgEl.textContent = 'First and last name are required.'; return; }
+    if (!phone)                   { msgEl.textContent = 'Phone number is required.'; return; }
+    if (!pw)                      { msgEl.textContent = 'Please create a new password.'; return; }
+    if (pw.length < 6)            { msgEl.textContent = 'Password must be at least 6 characters.'; return; }
+    if (pw !== pw2)               { msgEl.textContent = 'Passwords do not match.'; return; }
+
+    const users = getUsers();
+    if (!users[currentUser.username]) { msgEl.textContent = 'Account error — please sign out and back in.'; return; }
+
+    const displayName = firstName + ' ' + lastName;
+    users[currentUser.username] = {
+      ...users[currentUser.username],
+      firstName, lastName, address, phone,
+      displayName, password: pw, profileComplete: true
+    };
+    saveUsers(users);
+
+    currentUser.displayName = displayName;
+    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+
+    overlay.remove();
+    showToast('Welcome, ' + firstName + '! Your profile is all set.', 'info');
+  });
+}
+
 // ── SETTINGS ──
 function initSettings() {
-  // Load persisted settings from Firestore
+  // Load profile fields from account data
+  const users = getUsers();
+  const user  = users[currentUser.username] || {};
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = val || ''; };
+  setVal('settings-first-name', user.firstName);
+  setVal('settings-last-name',  user.lastName);
+  setVal('settings-address',    user.address);
+  setVal('settings-phone',      user.phone);
+
+  // Load notification prefs from settingsRef
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
-    const userSettings = (data[currentUser.username]) || {};
-
-    const nameInput = document.getElementById('settings-display-name');
-    if (nameInput) nameInput.value = userSettings.displayName || currentUser.displayName || '';
-
-    const prefs = userSettings.notifPrefs || {};
+    const prefs = ((data[currentUser.username]) || {}).notifPrefs || {};
     ['events', 'services', 'live', 'classes'].forEach(key => {
       const el = document.getElementById('notif-' + key);
       if (el) el.checked = !!(prefs[key]);
     });
   }).catch(() => {
-    // Fall back to localStorage if Firestore unavailable
-    const users = getUsers();
-    const user  = users[currentUser.username] || {};
-    const nameInput = document.getElementById('settings-display-name');
-    if (nameInput) nameInput.value = user.displayName || '';
     const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
     ['events', 'services', 'live', 'classes'].forEach(key => {
       const el = document.getElementById('notif-' + key);
@@ -1576,11 +1732,14 @@ function saveUserSettings(patch) {
 }
 
 function saveProfile() {
-  const msgEl      = document.getElementById('settings-profile-msg');
-  const displayName = document.getElementById('settings-display-name').value.trim();
-  const currentPw  = document.getElementById('settings-current-pw').value;
-  const newPw      = document.getElementById('settings-new-pw').value;
-  const confirmPw  = document.getElementById('settings-confirm-pw').value;
+  const msgEl    = document.getElementById('settings-profile-msg');
+  const firstName = document.getElementById('settings-first-name').value.trim();
+  const lastName  = document.getElementById('settings-last-name').value.trim();
+  const address   = document.getElementById('settings-address').value.trim();
+  const phone     = document.getElementById('settings-phone').value.trim();
+  const currentPw = document.getElementById('settings-current-pw').value;
+  const newPw     = document.getElementById('settings-new-pw').value;
+  const confirmPw = document.getElementById('settings-confirm-pw').value;
 
   const users = getUsers();
   const user  = users[currentUser.username];
@@ -1590,33 +1749,35 @@ function saveProfile() {
     msgEl.className = 'settings-msg error';
     return;
   }
-
   if (newPw && newPw !== confirmPw) {
     msgEl.textContent = 'New passwords do not match.';
     msgEl.className = 'settings-msg error';
     return;
   }
-
   if (newPw && newPw.length < 6) {
     msgEl.textContent = 'New password must be at least 6 characters.';
     msgEl.className = 'settings-msg error';
     return;
   }
 
-  user.displayName = displayName;
-  if (newPw) user.password = newPw;
+  const displayName = (firstName && lastName) ? firstName + ' ' + lastName : (firstName || lastName || user.displayName || currentUser.username);
+  users[currentUser.username] = {
+    ...user,
+    firstName, lastName, address, phone, displayName,
+    profileComplete: true,
+    ...(newPw ? { password: newPw } : {})
+  };
   saveUsers(users);
 
   currentUser.displayName = displayName;
   localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-
   saveUserSettings({ displayName });
 
   document.getElementById('settings-current-pw').value = '';
   document.getElementById('settings-new-pw').value     = '';
   document.getElementById('settings-confirm-pw').value = '';
 
-  msgEl.textContent = 'Profile saved successfully!';
+  msgEl.textContent = 'Profile saved!';
   msgEl.className = 'settings-msg success';
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
 }

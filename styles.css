@@ -1146,3 +1146,54 @@ body.is-admin .card-actions { display: flex; }
 }
 
 .sorei-empty-icon { font-size: 40px; margin-bottom: 12px; }
+
+/* ── Mandatory profile setup overlay ── */
+.profile-setup-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(160deg, var(--purple) 0%, var(--purple-light) 100%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 8000;
+  padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+  padding-top: calc(24px + env(safe-area-inset-top));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.profile-setup-card {
+  background: var(--surface);
+  border-radius: 20px;
+  padding: 28px 24px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+
+.profile-setup-logo {
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.profile-setup-logo img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+
+.profile-setup-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--purple);
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.profile-setup-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
