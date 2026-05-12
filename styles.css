@@ -9,7 +9,7 @@
   --surface: #ffffff;
   --text: #1a1a2e;
   --text-muted: #6b6b80;
-  --nav-h: 76px;       /* button area only — safe area added separately */
+  --nav-h: 68px;       /* height of each nav row (button area); 2 rows = 136px total */
   --header-h: 92px;    /* taller header */
   --radius: 16px;
 }
@@ -240,8 +240,8 @@ body {
   left: 0; right: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  /* clear nav button area + safe area + breathing room */
-  padding: 18px 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 24px);
+  /* clear 2 nav rows + safe area + breathing room */
+  padding: 18px 16px calc(var(--nav-h) * 2 + env(safe-area-inset-bottom) + 24px);
 }
 
 /* ── Tab sections ── */
@@ -612,27 +612,23 @@ body.is-admin .card-actions { display: flex; }
 .fb-btn { background: #1877f2; }
 .fb-btn:hover { background: #1558b0; }
 
-/* ── Bottom Nav (scrollable to support 8 tabs) ── */
+/* ── Bottom Nav — 2 rows × 4 buttons, always fully visible ── */
 .bottom-nav {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  height: auto;                        /* let buttons + safe area determine height */
+  height: auto;
   background: var(--surface);
   border-top: 2px solid #ede5f8;
   display: flex;
+  flex-wrap: wrap;                     /* wraps to 2 rows of 4 */
   padding-bottom: env(safe-area-inset-bottom);
   z-index: 100;
-  box-shadow: 0 -4px 20px rgba(74,28,110,0.12);
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  box-shadow: 0 -4px 24px rgba(74,28,110,0.14);
 }
 
-.bottom-nav::-webkit-scrollbar { display: none; }
-
 .nav-btn {
-  flex: 0 0 72px;
-  height: var(--nav-h);                /* fixed height on button so safe area doesn't crush it */
+  flex: 0 0 25%;                       /* 4 per row */
+  height: var(--nav-h);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -642,11 +638,13 @@ body.is-admin .card-actions { display: flex; }
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  transition: color 0.18s;
+  transition: color 0.18s, background 0.15s;
   -webkit-tap-highlight-color: transparent;
   position: relative;
+  border-top: 1px solid rgba(74,28,110,0.05);
 }
 
+.nav-btn:active { background: rgba(74,28,110,0.05); }
 .nav-btn.active { color: var(--purple); }
 
 .nav-btn.active::before {
@@ -654,13 +652,13 @@ body.is-admin .card-actions { display: flex; }
   position: absolute;
   top: 0; left: 50%;
   transform: translateX(-50%);
-  width: 32px; height: 3px;
+  width: 36px; height: 3px;
   background: var(--gold);
   border-radius: 0 0 4px 4px;
 }
 
 .nav-icon { font-size: 26px; line-height: 1; }
-.nav-label { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; }
+.nav-label { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
 .nav-btn.active .nav-icon { filter: drop-shadow(0 0 5px rgba(74,28,110,0.35)); }
 
 /* ── Modal ── */
@@ -1024,7 +1022,7 @@ body.is-admin .card-actions { display: flex; }
 /* ── Toast notifications ── */
 .app-toast {
   position: fixed;
-  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px);
+  bottom: calc(var(--nav-h) * 2 + env(safe-area-inset-bottom) + 12px);
   left: 16px;
   right: 16px;
   z-index: 99999;
@@ -1231,7 +1229,61 @@ body.is-admin .card-actions { display: flex; }
 
 .sorei-empty-icon { font-size: 40px; margin-bottom: 12px; }
 
+/* ── Sorei request button ── */
+.sorei-request-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--purple);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 7px 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Service rule info box ── */
+.service-rule-box {
+  background: #f5f0ff;
+  border: 1px solid #d8c8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
 /* ── Donation cards ── */
+.donation-give-btn {
+  display: block;
+  text-align: center;
+  padding: 18px;
+  background: linear-gradient(135deg, #3a1258, var(--purple));
+  color: #fff;
+  border-radius: var(--radius);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  box-shadow: 0 6px 24px rgba(74,28,110,0.35);
+  margin-bottom: 20px;
+  border: 2px solid rgba(255,255,255,0.1);
+}
+
+.donation-give-btn:active { opacity: 0.9; }
+
+.donation-other-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  padding-left: 4px;
+}
+
 .donation-hero {
   background: linear-gradient(135deg, var(--purple), var(--purple-light));
   border-radius: var(--radius);

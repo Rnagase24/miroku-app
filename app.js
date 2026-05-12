@@ -191,16 +191,17 @@ const DEFAULT_DATA = {
   soreiSaishi:  [],
   soreiRules:   '',
   donations: {
-    message: 'Thank you for your generous giving! Every contribution supports our ministry.',
-    paypal:  { enabled: false, link: '', note: '' },
-    zelle:   { enabled: false, info: '', note: '' },
-    venmo:   { enabled: false, handle: '', note: '' }
+    message:    'Thank you for your generous giving! Every contribution supports our ministry.',
+    websiteUrl: 'https://www.worldmessianic.org/donate',
+    zelle:      { enabled: false, info: '', note: '' },
+    venmo:      { enabled: false, handle: '', note: '' }
   },
   prayerForms: [
     { id: 1, type: 'daily',     title: 'Daily Prayer',                       description: 'Share your heart. Our prayer team prays over every request submitted here.',                              active: true, fixed: true },
     { id: 2, type: 'ancestors', title: 'Prayer Request for My Ancestors',     description: 'Request prayers for your ancestors and loved ones who have passed. Our ministers will hold them in prayer.', active: true, fixed: true }
   ],
-  prayerRequests: []
+  prayerRequests: [],
+  soreiRequests:  []
 };
 
 // ── Realtime Database layer ──
@@ -227,6 +228,7 @@ function subscribeData() {
       appData.soreiSaishi    = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
       appData.prayerForms    = ensureArray(appData.prayerForms,    DEFAULT_DATA.prayerForms);
       appData.prayerRequests = ensureArray(appData.prayerRequests);
+      appData.soreiRequests  = ensureArray(appData.soreiRequests);
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
@@ -1351,35 +1353,37 @@ function deleteMedia(id) {
 
 // ── DONATIONS ──
 const DONATION_METHODS = [
-  { key: 'paypal', label: 'PayPal', color: '#003087', bg: '#e8f0ff', getLink: d => d.link || '', getInfo: d => d.link ? d.link.replace(/^https?:\/\//, '') : '', btnLabel: 'Donate via PayPal' },
-  { key: 'zelle',  label: 'Zelle',  color: '#6d1ed4', bg: '#f3eeff', getLink: () => '',           getInfo: d => d.info || '',                                    btnLabel: '' },
-  { key: 'venmo',  label: 'Venmo',  color: '#3d95ce', bg: '#e8f5ff', getLink: d => d.handle ? 'https://venmo.com/' + d.handle.replace(/^@/, '') : '', getInfo: d => d.handle ? ('@' + d.handle.replace(/^@/, '')) : '', btnLabel: 'Open Venmo' }
+  { key: 'zelle', label: 'Zelle', color: '#6d1ed4', getInfo: d => d.info || '', getLink: () => '' },
+  { key: 'venmo', label: 'Venmo', color: '#3d95ce', getInfo: d => d.handle ? ('@' + d.handle.replace(/^@/, '')) : '', getLink: d => d.handle ? 'https://venmo.com/' + d.handle.replace(/^@/, '') : '' }
 ];
 
 function renderDonations() {
   const container = document.getElementById('donations-container');
   if (!container) return;
   const d = appData.donations || DEFAULT_DATA.donations;
-  const active = DONATION_METHODS.filter(m => { const md = d[m.key] || {}; return md.enabled && (m.getInfo(md) || m.getLink(md)); });
+  const websiteUrl = d.websiteUrl || DEFAULT_DATA.donations.websiteUrl;
+  const otherActive = DONATION_METHODS.filter(m => { const md = d[m.key] || {}; return md.enabled && m.getInfo(md); });
 
-  let html = `<div class="donation-hero"><div class="donation-hero-icon">&#128591;</div><p class="donation-hero-text">${esc(d.message || DEFAULT_DATA.donations.message)}</p></div>`;
+  let html = `
+    <div class="donation-hero">
+      <div class="donation-hero-icon">&#128591;</div>
+      <p class="donation-hero-text">${esc(d.message || DEFAULT_DATA.donations.message)}</p>
+    </div>
+    <a class="donation-give-btn" href="${esc(websiteUrl)}" target="_blank">&#128176; Give Now</a>`;
 
-  if (!active.length) {
-    html += `<p style="text-align:center;color:var(--text-muted);font-size:14px;padding:24px 0">${
-      isAdmin() ? 'No payment methods enabled yet. Tap Edit to configure.' : 'Please contact the church office for giving information.'
-    }</p>`;
-  } else {
-    html += active.map(method => {
+  if (otherActive.length) {
+    html += `<p class="donation-other-label">Other ways to give</p>`;
+    html += otherActive.map(method => {
       const md   = d[method.key] || {};
-      const link = method.getLink(md);
       const info = method.getInfo(md);
+      const link = method.getLink(md);
       return `
         <div class="donation-card" style="border-top:4px solid ${method.color}">
           <div class="donation-method-label" style="color:${method.color}">${method.label}</div>
-          ${info ? `<div class="donation-info">${esc(info)}</div>` : ''}
+          <div class="donation-info">${esc(info)}</div>
           ${md.note ? `<div class="donation-note">${esc(md.note)}</div>` : ''}
-          ${method.key === 'zelle' && !link ? `<p class="donation-note" style="margin-top:6px">Open your bank app and send to the phone/email above using Zelle.</p>` : ''}
-          ${link ? `<a class="donation-btn" href="${esc(link)}" target="_blank" style="background:${method.color}">${method.btnLabel}</a>` : ''}
+          ${method.key === 'zelle' ? `<p class="donation-note" style="margin-top:4px">Open your bank app and send to the number/email above using Zelle.</p>` : ''}
+          ${link ? `<a class="donation-btn" href="${esc(link)}" target="_blank" style="background:${method.color}">Open ${method.label}</a>` : ''}
         </div>`;
     }).join('');
   }
@@ -1390,24 +1394,15 @@ function openEditDonationsModal() {
   const d   = appData.donations || DEFAULT_DATA.donations;
   const val = (key, field) => esc((d[key] && d[key][field]) || '');
   const chk = key => (d[key] && d[key].enabled) ? 'checked' : '';
-  openModal('Edit Giving Methods', `
+  openModal('Edit Giving', `
     <div class="form-group"><label class="form-label">Message to Members</label>
       <textarea class="form-textarea" id="don-msg" style="min-height:60px">${esc(d.message || DEFAULT_DATA.donations.message)}</textarea></div>
+    <div class="form-group"><label class="form-label">Give Button URL</label>
+      <input class="form-input" id="don-url" type="url" value="${esc(d.websiteUrl || DEFAULT_DATA.donations.websiteUrl)}" placeholder="https://..." /></div>
 
     <div class="donation-edit-section">
-      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
-        <div class="toggle-info"><div class="toggle-title">&#128153; PayPal</div></div>
-        <label class="toggle-switch"><input type="checkbox" id="don-paypal-on" ${chk('paypal')} /><span class="toggle-slider"></span></label>
-      </div>
-      <div class="form-group"><label class="form-label">PayPal.me Link</label>
-        <input class="form-input" id="don-paypal-link" value="${val('paypal','link')}" placeholder="https://paypal.me/YourName" /></div>
-      <div class="form-group"><label class="form-label">Note (optional)</label>
-        <input class="form-input" id="don-paypal-note" value="${val('paypal','note')}" placeholder="e.g. Include your name in the note" /></div>
-    </div>
-
-    <div class="donation-edit-section">
-      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
-        <div class="toggle-info"><div class="toggle-title">&#128156; Zelle</div></div>
+      <div class="settings-toggle-row" style="padding:0;box-shadow:none;border:none;margin-bottom:10px">
+        <div class="toggle-info"><div class="toggle-title">&#128156; Show Zelle</div></div>
         <label class="toggle-switch"><input type="checkbox" id="don-zelle-on" ${chk('zelle')} /><span class="toggle-slider"></span></label>
       </div>
       <div class="form-group"><label class="form-label">Phone or Email</label>
@@ -1417,8 +1412,8 @@ function openEditDonationsModal() {
     </div>
 
     <div class="donation-edit-section">
-      <div class="settings-toggle-row" style="padding:0;box-shadow:none;margin-bottom:10px">
-        <div class="toggle-info"><div class="toggle-title">&#128184; Venmo</div></div>
+      <div class="settings-toggle-row" style="padding:0;box-shadow:none;border:none;margin-bottom:10px">
+        <div class="toggle-info"><div class="toggle-title">&#128184; Show Venmo</div></div>
         <label class="toggle-switch"><input type="checkbox" id="don-venmo-on" ${chk('venmo')} /><span class="toggle-slider"></span></label>
       </div>
       <div class="form-group"><label class="form-label">Venmo @handle</label>
@@ -1431,10 +1426,10 @@ function openEditDonationsModal() {
   `, () => {
     document.getElementById('save-donations-btn').addEventListener('click', () => {
       if (!appData.donations) appData.donations = {};
-      appData.donations.message = document.getElementById('don-msg').value.trim() || DEFAULT_DATA.donations.message;
-      appData.donations.paypal  = { enabled: document.getElementById('don-paypal-on').checked, link:   document.getElementById('don-paypal-link').value.trim(), note: document.getElementById('don-paypal-note').value.trim() };
-      appData.donations.zelle   = { enabled: document.getElementById('don-zelle-on').checked,  info:   document.getElementById('don-zelle-info').value.trim(),  note: document.getElementById('don-zelle-note').value.trim() };
-      appData.donations.venmo   = { enabled: document.getElementById('don-venmo-on').checked,  handle: document.getElementById('don-venmo-handle').value.trim().replace(/^@+/, ''), note: document.getElementById('don-venmo-note').value.trim() };
+      appData.donations.message    = document.getElementById('don-msg').value.trim() || DEFAULT_DATA.donations.message;
+      appData.donations.websiteUrl = document.getElementById('don-url').value.trim() || DEFAULT_DATA.donations.websiteUrl;
+      appData.donations.zelle      = { enabled: document.getElementById('don-zelle-on').checked, info: document.getElementById('don-zelle-info').value.trim(), note: document.getElementById('don-zelle-note').value.trim() };
+      appData.donations.venmo      = { enabled: document.getElementById('don-venmo-on').checked, handle: document.getElementById('don-venmo-handle').value.trim().replace(/^@+/, ''), note: document.getElementById('don-venmo-note').value.trim() };
       saveData(); closeModal();
     });
   });
@@ -1716,9 +1711,11 @@ function renderSoreiSaishi(filter) {
           <div class="ancestor-row-left">
             <div class="ancestor-name">${esc(anc.name)}</div>
             <div class="ancestor-relation">${esc(anc.relation || '')}</div>
+            ${anc.deathDate ? `<div class="ancestor-date" style="font-size:11px">&#10012; Transitioned: ${esc(fromInputDate(anc.deathDate))}</div>` : ''}
             <div class="ancestor-date">${esc(soreiDateDisplay(anc))}</div>
             ${badge}
             ${anc.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(anc.notes)}</div>` : ''}
+            <button class="sorei-request-btn" data-req-entry="${entry.id}" data-req-anc="${anc.id}" style="margin-top:8px">&#128395; Request Service</button>
           </div>
           ${isAdm ? `<div class="card-actions" style="display:flex">
             <button class="card-action-btn" data-edit-anc="${entry.id}" data-anc-idx="${anc.id}">&#9998;</button>
@@ -1761,6 +1758,8 @@ function renderSoreiSaishi(filter) {
     b.addEventListener('click', () => openAncestorModal(parseInt(b.dataset.editAnc, 10), parseInt(b.dataset.ancIdx, 10))));
   document.querySelectorAll('[data-del-anc]').forEach(b =>
     b.addEventListener('click', () => deleteAncestor(parseInt(b.dataset.delAnc, 10), parseInt(b.dataset.ancIdx, 10))));
+  document.querySelectorAll('[data-req-entry]').forEach(b =>
+    b.addEventListener('click', () => openServiceRequestModal(parseInt(b.dataset.reqEntry, 10), parseInt(b.dataset.reqAnc, 10))));
 }
 
 function deleteEnrollment(id) {
@@ -1826,10 +1825,13 @@ function openAncestorModal(entryId, ancId) {
       <input class="form-input" id="anc-name" value="${esc(anc ? anc.name : '')}" placeholder="Full name" /></div>
     <div class="form-group"><label class="form-label">Relation</label>
       <input class="form-input" id="anc-relation" value="${esc(anc ? anc.relation || '' : '')}" placeholder="e.g. Grandfather, Mother" /></div>
-    <div class="form-group"><label class="form-label">Service Type</label>
+    <div class="form-group"><label class="form-label">Date of Transition</label>
+      <input class="form-input" id="anc-death-date" type="date" value="${esc(anc ? anc.deathDate || '' : '')}" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:3px">Date the ancestor passed away — used to track service eligibility</p></div>
+    <div class="form-group"><label class="form-label">Annual Service Schedule</label>
       <select class="form-input" id="anc-type">
-        <option value="annual"  ${isAnnual  ? 'selected' : ''}>Annual (repeats every year)</option>
-        <option value="onetime" ${!isAnnual ? 'selected' : ''}>One-time (specific date)</option>
+        <option value="annual"  ${isAnnual  ? 'selected' : ''}>Annual (repeats every year on same date)</option>
+        <option value="onetime" ${!isAnnual ? 'selected' : ''}>One-time (specific date only)</option>
       </select></div>
     <div id="anc-annual-fields" style="${isAnnual ? '' : 'display:none'}">
       <div style="display:flex;gap:8px">
@@ -1859,10 +1861,11 @@ function openAncestorModal(entryId, ancId) {
     });
 
     document.getElementById('save-anc-btn').addEventListener('click', () => {
-      const name     = document.getElementById('anc-name').value.trim();
-      const relation = document.getElementById('anc-relation').value.trim();
-      const type     = document.getElementById('anc-type').value;
-      const notes    = document.getElementById('anc-notes').value.trim();
+      const name      = document.getElementById('anc-name').value.trim();
+      const relation  = document.getElementById('anc-relation').value.trim();
+      const deathDate = document.getElementById('anc-death-date').value;
+      const type      = document.getElementById('anc-type').value;
+      const notes     = document.getElementById('anc-notes').value.trim();
       if (!name) return;
 
       let ancData;
@@ -1886,13 +1889,242 @@ function openAncestorModal(entryId, ancId) {
       if (!entry.ancestors) entry.ancestors = [];
       if (ancId) {
         const idx = entry.ancestors.findIndex(a => a.id === ancId);
-        if (idx >= 0) entry.ancestors[idx] = { id: ancId, name, relation, notes, ...ancData };
+        if (idx >= 0) entry.ancestors[idx] = { id: ancId, name, relation, deathDate, notes, ...ancData };
       } else {
-        entry.ancestors.push({ id: nextId(entry.ancestors), name, relation, notes, ...ancData });
+        entry.ancestors.push({ id: nextId(entry.ancestors), name, relation, deathDate, notes, ...ancData });
       }
       saveData(); closeModal();
     });
   });
+}
+
+// ── SOREI SERVICE REQUESTS ──
+const NEN_SAI_YEARS = [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100];
+
+function nenSaiEligibleYear(deathDate) {
+  if (!deathDate) return null;
+  const death = new Date(deathDate + 'T00:00:00');
+  const thisYear = new Date().getFullYear();
+  const elapsed = thisYear - death.getFullYear();
+  return NEN_SAI_YEARS.includes(elapsed) ? elapsed : null;
+}
+
+function shinreiDaysRemaining(deathDate) {
+  if (!deathDate) return null;
+  const death = new Date(deathDate + 'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Math.round((today - death) / 86400000);
+  return 50 - days; // positive = still within window
+}
+
+function addDays(isoDate, n) {
+  const d = new Date(isoDate + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  return DAYS[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+}
+
+function openServiceRequestModal(entryId, ancId) {
+  const entry = (appData.soreiSaishi || []).find(e => e.id === entryId);
+  if (!entry) return;
+  const anc = (entry.ancestors || []).find(a => a.id === ancId);
+  if (!anc) return;
+
+  const deathDate = anc.deathDate || '';
+  const shinreiDays = deathDate ? shinreiDaysRemaining(deathDate) : null;
+  const nenYear = deathDate ? nenSaiEligibleYear(deathDate) : null;
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  // Min date for irei-sai / nen-sai: 30 days from today
+  const minDate = (() => {
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  })();
+
+  const shinreiLabel = shinreiDays !== null
+    ? (shinreiDays >= 0 ? `&#10003; Eligible — ${shinreiDays} day${shinreiDays !== 1 ? 's' : ''} remaining in 50-day window` : `&#10007; Window closed — more than 50 days have passed since transition`)
+    : '&#9432; Death date required — edit this ancestor first';
+
+  const shinreiOk   = shinreiDays !== null && shinreiDays >= 0;
+  const isShinreiDisabled = !shinreiOk ? 'disabled' : '';
+
+  const nenLabel = deathDate
+    ? (nenYear ? `&#10003; Eligible — year ${nenYear} service` : `&#10007; Not eligible this year (next eligible: ${NEN_SAI_YEARS.map(y => { const d = new Date(deathDate+'T00:00:00'); d.setFullYear(d.getFullYear()+y); return d.getFullYear(); }).find(y => y >= new Date().getFullYear())} or later)`)
+    : '&#9432; Death date required — edit this ancestor first';
+  const isNenDisabled = (!deathDate || !nenYear) ? 'disabled' : '';
+
+  openModal('Request a Service', `
+    <p style="font-size:13px;color:var(--purple);font-weight:700;margin-bottom:4px">${esc(anc.name)}</p>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:20px">${esc(entry.memberName)}</p>
+
+    <div class="form-group">
+      <label class="form-label">Service Type</label>
+      <select class="form-input" id="sr-type">
+        <option value="">— Choose a service type —</option>
+        <option value="shinrei" ${isShinreiDisabled}>Shinrei-Saishi (newly transitioned)</option>
+        <option value="irei">Irei-Sai (annual memorial)</option>
+        <option value="nen" ${isNenDisabled}>Nen-Sai (special year memorial)</option>
+      </select>
+    </div>
+
+    <div id="sr-shinrei-info" class="service-rule-box" style="display:none">
+      <p style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:6px">Shinrei-Saishi</p>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.55;margin-bottom:8px">Requested within the first 50 days of transition. A personalized service letter with the 10-day schedule will be generated upon confirmation.</p>
+      <p style="font-size:13px;margin-bottom:4px">${shinreiLabel}</p>
+      ${deathDate ? `<p style="font-size:12px;color:var(--text-muted);margin-top:6px">10-day services: <strong>${addDays(deathDate,10)}</strong>, <strong>${addDays(deathDate,20)}</strong>, <strong>${addDays(deathDate,30)}</strong>, <strong>${addDays(deathDate,40)}</strong>, <strong>${addDays(deathDate,50)}</strong></p>` : ''}
+    </div>
+
+    <div id="sr-irei-info" class="service-rule-box" style="display:none">
+      <p style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:6px">Irei-Sai — Annual Memorial</p>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.55;margin-bottom:12px">Can be requested any time. Usually held on the anniversary of the transition. Must be requested at least 30 days before the desired date.</p>
+      <div class="form-group">
+        <label class="form-label">Desired Service Date</label>
+        <input class="form-input" id="sr-irei-date" type="date" min="${minDate}" />
+      </div>
+    </div>
+
+    <div id="sr-nen-info" class="service-rule-box" style="display:none">
+      <p style="font-size:13px;font-weight:700;color:var(--purple);margin-bottom:6px">Nen-Sai — Special Year Memorial</p>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.55;margin-bottom:8px">Available only in specific anniversary years (1st, 2nd, 3rd, 4th, 5th, 10th, 15th, 20th, 30th, 40th, 50th, 100th). Must be requested at least 30 days before the desired date.</p>
+      <p style="font-size:13px;margin-bottom:12px">${nenLabel}</p>
+      ${nenYear ? `
+      <div class="form-group">
+        <label class="form-label">Desired Service Date</label>
+        <input class="form-input" id="sr-nen-date" type="date" min="${minDate}" />
+      </div>` : ''}
+    </div>
+
+    <div class="form-group" style="margin-top:8px">
+      <label class="form-label">Notes (optional)</label>
+      <textarea class="form-textarea" id="sr-notes" placeholder="Any additional information for the minister..."></textarea>
+    </div>
+
+    <button class="form-btn form-btn-primary" id="sr-submit-btn">Submit Request</button>
+  `, () => {
+    const typeEl = document.getElementById('sr-type');
+    const boxes  = { shinrei: 'sr-shinrei-info', irei: 'sr-irei-info', nen: 'sr-nen-info' };
+
+    typeEl.addEventListener('change', () => {
+      Object.values(boxes).forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+      const sel = boxes[typeEl.value];
+      if (sel) { const el = document.getElementById(sel); if(el) el.style.display = ''; }
+    });
+
+    document.getElementById('sr-submit-btn').addEventListener('click', () => {
+      const type  = typeEl.value;
+      const notes = document.getElementById('sr-notes').value.trim();
+      if (!type) { showToast('Please choose a service type.', 'error'); return; }
+
+      let desiredDate = '';
+      if (type === 'irei') {
+        desiredDate = (document.getElementById('sr-irei-date') || {}).value;
+        if (!desiredDate) { showToast('Please select a desired service date.', 'error'); return; }
+        const diff = Math.round((new Date(desiredDate+'T00:00:00') - new Date().setHours(0,0,0,0)) / 86400000);
+        if (diff < 30) { showToast('Irei-Sai must be requested at least 30 days before the service date.', 'error'); return; }
+      } else if (type === 'nen') {
+        desiredDate = (document.getElementById('sr-nen-date') || {}).value;
+        if (!desiredDate) { showToast('Please select a desired service date.', 'error'); return; }
+        const diff = Math.round((new Date(desiredDate+'T00:00:00') - new Date().setHours(0,0,0,0)) / 86400000);
+        if (diff < 30) { showToast('Nen-Sai must be requested at least 30 days before the service date.', 'error'); return; }
+      }
+
+      const typeLabels = { shinrei: 'Shinrei-Saishi', irei: 'Irei-Sai', nen: 'Nen-Sai' };
+      const request = {
+        id:             Date.now(),
+        entryId,
+        ancId,
+        memberName:     entry.memberName,
+        memberUsername: entry.memberUsername || '',
+        ancestorName:   anc.name,
+        serviceType:    type,
+        serviceLabel:   typeLabels[type],
+        deathDate:      deathDate,
+        desiredDate,
+        notes,
+        status:         'pending',
+        submittedAt:    new Date().toISOString()
+      };
+
+      if (!appData.soreiRequests) appData.soreiRequests = [];
+      appData.soreiRequests.push(request);
+      saveData();
+
+      if (type === 'shinrei') {
+        printShireiSaishiLetter(entry, anc, deathDate);
+      }
+
+      closeModal();
+      showToast('Service request submitted! Please contact your minister to schedule.', 'info');
+    });
+  });
+}
+
+function printShireiSaishiLetter(entry, anc, deathDate) {
+  const schedDates = [10, 20, 30, 40, 50].map(n => `<tr><td style="padding:8px 12px;font-weight:600">Day ${n}</td><td style="padding:8px 12px">${addDays(deathDate, n)}</td></tr>`).join('');
+
+  const deathDisplay = (() => {
+    const d = new Date(deathDate + 'T00:00:00');
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    return DAYS[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+  })();
+
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Shinrei-Saishi Service Letter</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 720px; margin: 40px auto; padding: 0 24px; color: #1a1a2e; line-height: 1.7; }
+  h1 { color: #4a1c6e; font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: #6b3fa0; font-size: 14px; letter-spacing: 0.05em; margin-bottom: 32px; }
+  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #4a1c6e; margin: 24px 0 8px; border-bottom: 2px solid #d4a843; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+  tr:nth-child(odd) td { background: #f5f0ff; }
+  td { border: 1px solid #e0d8ed; font-size: 14px; }
+  .note { background: #fff7ed; border-left: 4px solid #d4a843; padding: 14px 16px; border-radius: 4px; font-size: 14px; margin-top: 24px; }
+  .footer { margin-top: 40px; font-size: 12px; color: #6b6b80; border-top: 1px solid #e0d8ed; padding-top: 12px; }
+  @media print { body { margin: 24px auto; } }
+</style>
+</head>
+<body>
+<h1>Miroku LA Church</h1>
+<div class="subtitle">World Messianity — Los Angeles</div>
+
+<p>Date: ${today}</p>
+<p>Dear <strong>${esc(entry.memberName)}</strong>,</p>
+<p>We have received your Shinrei-Saishi service request and wish to express our sincere condolences during this time of transition. Please find below the schedule for the 50-day memorial services for your ancestor.</p>
+
+<div class="section-title">Ancestor Information</div>
+<p><strong>Name:</strong> ${esc(anc.name)}<br />
+<strong>Relation:</strong> ${esc(anc.relation || 'Ancestor')}<br />
+<strong>Date of Transition:</strong> ${deathDisplay}</p>
+
+<div class="section-title">50-Day Service Schedule</div>
+<p style="font-size:13px;color:#6b6b80;margin-bottom:8px">Services should ideally be performed on or near each of the following dates:</p>
+<table>
+  <thead><tr style="background:#4a1c6e;color:#fff"><td style="padding:8px 12px">Service</td><td style="padding:8px 12px">Scheduled Date</td></tr></thead>
+  <tbody>${schedDates}</tbody>
+</table>
+
+<div class="note">
+  <strong>Important:</strong> Please contact your minister as soon as possible to arrange the dates and times for each service. The 50-day Shinrei-Saishi period is a sacred time of spiritual transition. Your participation and prayers are essential.
+</div>
+
+<p style="margin-top:24px">May your ancestor rest in the Light of God, and may your family find peace and comfort during this time.</p>
+<p>In faith and service,<br /><strong>Miroku LA Church</strong><br />World Messianity — Los Angeles</p>
+
+<div class="footer">Miroku LA Church &bull; worldmessianic.org &bull; This letter was generated on ${today}</div>
+</body>
+</html>`);
+  win.document.close();
+  setTimeout(() => win.print(), 600);
 }
 
 function openSoreiRulesModal() {
@@ -2048,16 +2280,17 @@ function initSettings() {
   setVal('settings-phone',      user.phone);
 
   // Load notification prefs from settingsRef
+  const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'classes'];
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
     const prefs = ((data[currentUser.username]) || {}).notifPrefs || {};
-    ['events', 'services', 'live', 'classes'].forEach(key => {
+    NOTIF_KEYS.forEach(key => {
       const el = document.getElementById('notif-' + key);
       if (el) el.checked = !!(prefs[key]);
     });
   }).catch(() => {
     const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
-    ['events', 'services', 'live', 'classes'].forEach(key => {
+    NOTIF_KEYS.forEach(key => {
       const el = document.getElementById('notif-' + key);
       if (el) el.checked = !!(prefs[key]);
     });
@@ -2071,7 +2304,7 @@ function initSettings() {
   }
 
   // Notification toggles
-  ['events', 'services', 'live', 'classes'].forEach(key => {
+  ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'classes'].forEach(key => {
     const el = document.getElementById('notif-' + key);
     if (!el) return;
     el.replaceWith(el.cloneNode(true));
