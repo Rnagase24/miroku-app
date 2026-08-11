@@ -543,13 +543,44 @@ function showApp(visible) {
 document.getElementById('logout-btn').addEventListener('click', logout);
 
 // ── Tab navigation ──
+
+// Track whether a More sub-section is open
+let moreSubSection = null;
+
+function navigateToTab(tab) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  const navBtn = document.querySelector(`.nav-btn[data-tab="${tab}"]`);
+  if (navBtn) navBtn.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  moreSubSection = null;
+  // Hide all more-back-bars
+  document.querySelectorAll('.more-back-bar').forEach(b => b.classList.add('hidden'));
+}
+
+function navigateToMoreSection(section) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + section).classList.add('active');
+  // Show back bar for this section
+  document.querySelectorAll('.more-back-bar').forEach(b => b.classList.add('hidden'));
+  const bar = document.getElementById('back-bar-' + section);
+  if (bar) bar.classList.remove('hidden');
+  moreSubSection = section;
+  // Keep "More" nav button active
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const moreBtn = document.querySelector('.nav-btn[data-tab="more"]');
+  if (moreBtn) moreBtn.classList.add('active');
+}
+
 document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-  });
+  btn.addEventListener('click', () => navigateToTab(btn.dataset.tab));
+});
+
+document.addEventListener('click', e => {
+  const moreRow = e.target.closest('[data-more]');
+  if (moreRow) { navigateToMoreSection(moreRow.dataset.more); return; }
+  const backBtn = e.target.closest('[data-back]');
+  if (backBtn) { navigateToTab(backBtn.dataset.back); return; }
 });
 
 // ── YouTube auto-sync ──
