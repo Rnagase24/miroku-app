@@ -16,51 +16,91 @@ const settingsRef  = db.ref('church/settings');
 const accountsRef  = db.ref('church/accounts');
 const signinLogRef = db.ref('church/signinLog');
 
-// ── Auth ──
-const SESSION_KEY = 'miroku-session';
-const USERS_KEY   = 'miroku-users';
-const NOTIF_KEY   = 'miroku-notif';
+// ── Auth (Firebase Authentication) ──
+// Credentials live in Firebase Auth (Google hashes the passwords); profile and
+// role live in church/users/{uid}. Nothing here ever stores a password.
+const USERS_KEY = 'miroku-users';
+const NOTIF_KEY = 'miroku-notif';
 
-let usersCache = null; // null = not yet loaded from Firestore
+const auth     = firebase.auth();
+const usersRef = db.ref('church/users');
+
+// Profiles are stored keyed by Firebase Auth uid, but the rest of the app
+// looks accounts up by username. getUsers() returns a username-keyed view so
+// existing call sites keep working; saveUsers() maps it back to uid keys.
+let profilesByUid = null; // null = not yet loaded
+let usersCache    = null;
+
+function usernameFor(uid, profile) {
+  return profile.username || String(profile.email || uid).split('@')[0].toLowerCase();
+}
+
+function rebuildUsersCache() {
+  const byName = {};
+  Object.entries(profilesByUid || {}).forEach(([uid, p]) => {
+    byName[usernameFor(uid, p)] = { ...p, uid };
+  });
+  usersCache = byName;
+  try { localStorage.setItem(USERS_KEY, JSON.stringify(byName)); } catch {}
+  return byName;
+}
 
 function getUsers() {
   if (usersCache !== null) return usersCache;
   try {
     const s = localStorage.getItem(USERS_KEY);
-    return s ? JSON.parse(s) : getDefaultUsers();
-  } catch { return getDefaultUsers(); }
+    return s ? JSON.parse(s) : {};
+  } catch { return {}; }
 }
 
-function getDefaultUsers() {
-  return {
-    admin:  { password: 'MirokuAdmin2025',  role: 'admin',  displayName: 'Administrator' },
-    member: { password: 'MirokuMember2025', role: 'member', displayName: 'Member'        }
-  };
-}
-
-function saveUsers(users) {
-  usersCache = users;
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  accountsRef.set(users).catch(err => {
-    console.error('Account sync error:', err);
-    showToast('Warning: accounts may not sync to other devices. Check Firebase rules.', 'error');
+// Write a single profile. Security rules only let a member write their own
+// node, so self-updates must go through here rather than a whole-map set().
+function saveUserProfile(uid, profile) {
+  const clean = { ...profile };
+  delete clean.uid;
+  delete clean.password; // never persist a password again
+  profilesByUid = { ...(profilesByUid || {}), [uid]: clean };
+  rebuildUsersCache();
+  return usersRef.child(uid).set(clean).catch(err => {
+    console.error('Profile sync error:', err);
+    showToast('Could not save to the server — check your connection.', 'error');
   });
 }
 
+// Whole-map write. Rules restrict this to admins.
+function saveUsers(users) {
+  const byUid = {};
+  Object.entries(users).forEach(([uname, u]) => {
+    const uid = u.uid;
+    if (!uid) return; // no uid == no Firebase Auth account; skip
+    const clean = { ...u, username: u.username || uname };
+    delete clean.uid;
+    delete clean.password;
+    byUid[uid] = clean;
+  });
+  profilesByUid = byUid;
+  rebuildUsersCache();
+  usersRef.set(byUid).catch(err => {
+    console.error('Account sync error:', err);
+    showToast('Could not sync accounts — admin permission required.', 'error');
+  });
+}
+
+async function loadProfiles() {
+  const snap = await usersRef.once('value');
+  profilesByUid = snap.exists() ? snap.val() : {};
+  return rebuildUsersCache();
+}
+
+function myProfile() {
+  if (!currentUser) return null;
+  return (profilesByUid || {})[currentUser.uid] || null;
+}
+
+// Kept for call sites that refresh the account list before acting on it.
 async function loadUsersFromFirestore() {
-  try {
-    const snap = await accountsRef.once('value');
-    if (snap.exists()) {
-      usersCache = snap.val();
-      localStorage.setItem(USERS_KEY, JSON.stringify(usersCache));
-    } else {
-      try { usersCache = JSON.parse(localStorage.getItem(USERS_KEY) || 'null') || getDefaultUsers(); }
-      catch { usersCache = getDefaultUsers(); }
-      accountsRef.set(usersCache).catch(() => {});
-    }
-  } catch {
-    usersCache = null; // Database unavailable — getUsers() falls back to localStorage
-  }
+  try { await loadProfiles(); }
+  catch { /* offline — getUsers() falls back to the cached copy */ }
 }
 
 function showToast(msg, type = 'info') {
@@ -87,13 +127,11 @@ function formatLastSeen(iso) {
 
 function logSignIn() {
   if (!currentUser) return;
-  const now   = new Date().toISOString();
-  const users = getUsers();
-  if (users && users[currentUser.username]) {
-    users[currentUser.username].lastSeen = now;
-    saveUsers(users);
-  }
+  const now = new Date().toISOString();
+  const p   = myProfile();
+  if (p) saveUserProfile(currentUser.uid, { ...p, lastSeen: now });
   signinLogRef.push({
+    uid:         currentUser.uid,
     username:    currentUser.username,
     displayName: currentUser.displayName || currentUser.username,
     timestamp:   now
@@ -102,47 +140,104 @@ function logSignIn() {
 
 function checkProfileCompletion() {
   if (!currentUser) return;
-  const users = getUsers();
-  const user  = users[currentUser.username];
-  if (user && user.profileComplete !== true) {
-    openMandatoryProfileModal(user);
-  }
+  const p = myProfile();
+  if (p && p.profileComplete !== true) openMandatoryProfileModal(p);
 }
 
 let currentUser = null;
 
-function checkSession() {
-  try {
-    const s = localStorage.getItem(SESSION_KEY);
-    if (s) { currentUser = JSON.parse(s); return true; }
-  } catch {}
-  return false;
-}
+function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 
-function login(username, password) {
-  const users = getUsers();
-  const key   = username.toLowerCase().trim();
-  const user  = users[key];
-  if (user && user.password === password) {
-    currentUser = { username: key, role: user.role, displayName: user.displayName || key };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-    return true;
+// Turn a Firebase Auth error into something a church member can act on.
+function authErrorMessage(err) {
+  switch (err && err.code) {
+    case 'auth/invalid-email':         return 'That does not look like a valid email address.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':    return 'Incorrect email or password.';
+    case 'auth/too-many-requests':     return 'Too many attempts. Please wait a few minutes and try again.';
+    case 'auth/email-already-in-use':  return 'An account already exists for that email. Try signing in instead.';
+    case 'auth/weak-password':         return 'Password must be at least 6 characters.';
+    case 'auth/network-request-failed':return 'No connection — check your internet and try again.';
+    case 'auth/operation-not-allowed':
+    case 'auth/configuration-not-found':
+      return 'Email sign-in is not switched on for this app yet. Please contact a church admin.';
+    default:
+      console.error('Auth error:', err);
+      return 'Something went wrong signing in. Please try again.';
   }
-  return false;
 }
 
-function logout() {
-  currentUser = null;
-  localStorage.removeItem(SESSION_KEY);
+// Creating an Auth account fires onAuthStateChanged immediately — before the
+// matching profile has been written. This gate makes the listener wait rather
+// than racing ahead and seeding a blank profile over the real one.
+let provisioning = null;
+function beginProvisioning() {
+  let done;
+  provisioning = new Promise(resolve => { done = resolve; });
+  return () => { done(); provisioning = null; };
+}
+
+// Sign in. If no Firebase Auth account exists yet but a legacy account with a
+// matching password does, migrate it transparently (see migrateLegacyAccount).
+async function signIn(email, password) {
+  const addr = String(email || '').trim().toLowerCase();
+  try {
+    await auth.signInWithEmailAndPassword(addr, password);
+    return { ok: true };
+  } catch (err) {
+    if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+      const migrated = await migrateLegacyAccount(addr, password);
+      if (migrated) return { ok: true };
+    }
+    return { ok: false, message: authErrorMessage(err) };
+  }
+}
+
+// One-time upgrade of an account created under the old plaintext system.
+// Only succeeds if the password the member typed matches the stored one, so
+// this cannot be used to claim someone else's account.
+async function migrateLegacyAccount(email, password) {
+  let legacy = null;
+  try {
+    const snap = await accountsRef.once('value');
+    if (!snap.exists()) return false;
+    const entry = Object.entries(snap.val()).find(([, u]) =>
+      String(u.email || '').trim().toLowerCase() === email && u.password === password
+    );
+    if (!entry) return false;
+    legacy = { username: entry[0], ...entry[1] };
+  } catch {
+    return false; // accounts node already locked down — nothing to migrate
+  }
+
+  const finish = beginProvisioning();
+  try {
+    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    const uid  = cred.user.uid;
+    const { password: _pw, ...rest } = legacy;
+    await usersRef.child(uid).set({
+      ...rest,
+      email,
+      username: legacy.username,
+      role:     legacy.role === 'admin' ? 'admin' : 'member',
+      migratedAt: new Date().toISOString()
+    });
+    // Drop the plaintext password now that Firebase Auth owns the credential.
+    await accountsRef.child(legacy.username).remove().catch(() => {});
+    return true;
+  } finally {
+    finish();
+  }
+}
+
+async function logout() {
   unsubscribeData();
-  // Tell the browser not to silently re-login after an explicit sign out
   if ('credentials' in navigator) {
     navigator.credentials.preventSilentAccess().catch(() => {});
   }
-  showApp(false);
+  try { await auth.signOut(); } catch {}
 }
-
-function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 
 // ── Default Data ──
 const DEFAULT_DATA = {
@@ -326,33 +421,76 @@ async function storeCredential(username, password) {
   } catch {}
 }
 
-async function tryAutoLogin() {
-  await loadUsersFromFirestore(); // sync accounts from Firestore before checking credentials
+// Firebase Auth owns the session and restores it on load, so there is no
+// manual session check any more — this listener is the single entry point.
+let authReady = false;
+auth.onAuthStateChanged(async user => {
+  if (!user) {
+    currentUser = null;
+    showApp(false);
+    authReady = true;
+    return;
+  }
 
-  if (checkSession()) { showApp(true); logSignIn(); return; }
+  // Wait out any signup/migration that is still writing this user's profile.
+  if (provisioning) { try { await provisioning; } catch {} }
 
-  if (!('credentials' in navigator) || !window.PasswordCredential) return;
   try {
-    const cred = await navigator.credentials.get({ password: true, mediation: 'silent' });
-    if (cred && login(cred.id, cred.password)) { showApp(true); logSignIn(); }
-  } catch {}
-}
+    await loadProfiles();
+  } catch {
+    // Rules deny reads until a profile exists; fall through with what we have.
+  }
+
+  let profile = (profilesByUid || {})[user.uid];
+  if (!profile) {
+    // First sign-in on an Auth account with no profile yet (e.g. created from
+    // the Firebase console). Seed a member profile so the app has a role.
+    profile = {
+      email:       user.email || '',
+      username:    String(user.email || user.uid).split('@')[0].toLowerCase(),
+      displayName: user.displayName || String(user.email || '').split('@')[0],
+      role:        'member',
+      profileComplete: false
+    };
+    await saveUserProfile(user.uid, profile);
+  }
+
+  currentUser = {
+    uid:         user.uid,
+    email:       user.email || profile.email || '',
+    username:    usernameFor(user.uid, profile),
+    role:        profile.role === 'admin' ? 'admin' : 'member',
+    displayName: profile.displayName || profile.username || user.email
+  };
+
+  showApp(true);
+  logSignIn();
+  authReady = true;
+});
 
 // ── Login ──
 document.getElementById('login-form').addEventListener('submit', async e => {
   e.preventDefault();
-  const username = document.getElementById('login-username').value;
+  const email = document.getElementById('login-username').value;
   const password = document.getElementById('login-password').value;
-  const errEl    = document.getElementById('login-error');
-  if (login(username, password)) {
-    errEl.textContent = '';
-    document.getElementById('login-password').value = '';
-    await storeCredential(username, password);
-    showApp(true);
-    logSignIn();
-  } else {
-    errEl.textContent = 'Incorrect username or password.';
-    document.getElementById('login-password').value = '';
+  const errEl = document.getElementById('login-error');
+  const btn   = document.querySelector('#login-form button[type="submit"]');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  try {
+    const res = await signIn(email, password);
+    if (res.ok) {
+      document.getElementById('login-password').value = '';
+      await storeCredential(email.trim().toLowerCase(), password);
+      // onAuthStateChanged takes it from here.
+    } else {
+      errEl.textContent = res.message;
+      document.getElementById('login-password').value = '';
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
   }
 });
 
@@ -372,38 +510,14 @@ document.getElementById('show-signin-btn').addEventListener('click', () => {
   document.getElementById('login-error').textContent = '';
 });
 
-// ── Account Recovery (forgot username / password) ──
-// No backend exists to send reset emails, so identity is proven by matching
-// BOTH the email and phone number recorded on the account at signup.
-const RECOVERY_KEY      = 'miroku-recovery-attempts';
-const RECOVERY_MAX      = 5;
-const RECOVERY_WINDOW_MS = 15 * 60 * 1000;
-let recoverTarget = null;
-
-const digitsOnly = v => String(v || '').replace(/\D/g, '');
-
-function recoveryAttempts() {
-  try {
-    const a = JSON.parse(localStorage.getItem(RECOVERY_KEY) || 'null');
-    if (!a || Date.now() - a.first > RECOVERY_WINDOW_MS) return { count: 0, first: Date.now() };
-    return a;
-  } catch { return { count: 0, first: Date.now() }; }
-}
-
-function bumpRecoveryAttempts() {
-  const a = recoveryAttempts();
-  a.count += 1;
-  localStorage.setItem(RECOVERY_KEY, JSON.stringify(a));
-}
-
+// ── Password Reset (Firebase Authentication) ──
+// Firebase sends a real reset link to the member's inbox; the app never sees
+// or sets the password itself.
 function resetRecoveryView() {
-  recoverTarget = null;
   document.getElementById('recover-form').classList.remove('hidden');
-  document.getElementById('reset-form').classList.add('hidden');
-  ['recover-email','recover-phone','reset-password','reset-confirm']
-    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('recover-email').value = '';
   document.getElementById('recover-error').textContent = '';
-  document.getElementById('reset-error').textContent   = '';
+  document.getElementById('recover-sent').classList.add('hidden');
 }
 
 document.getElementById('show-recover-btn').addEventListener('click', () => {
@@ -411,6 +525,8 @@ document.getElementById('show-recover-btn').addEventListener('click', () => {
   document.getElementById('signin-view').classList.add('hidden');
   document.getElementById('signup-view').classList.add('hidden');
   document.getElementById('recover-view').classList.remove('hidden');
+  const typed = document.getElementById('login-username').value.trim();
+  if (typed) document.getElementById('recover-email').value = typed;
   document.getElementById('recover-email').focus();
 });
 
@@ -421,95 +537,36 @@ document.getElementById('recover-back-btn').addEventListener('click', () => {
   document.getElementById('login-error').textContent = '';
 });
 
-// Step 1 — look the account up by email + phone
 document.getElementById('recover-form').addEventListener('submit', async e => {
   e.preventDefault();
   const email = document.getElementById('recover-email').value.trim().toLowerCase();
-  const phone = digitsOnly(document.getElementById('recover-phone').value);
   const errEl = document.getElementById('recover-error');
   const btn   = document.querySelector('#recover-form button[type="submit"]');
   errEl.textContent = '';
-
-  if (recoveryAttempts().count >= RECOVERY_MAX) {
-    errEl.textContent = 'Too many attempts. Please wait 15 minutes, or ask a church admin to reset it for you.';
-    return;
-  }
-  if (!email || !phone) { errEl.textContent = 'Please enter both your email and your phone number.'; return; }
+  if (!email) { errEl.textContent = 'Please enter your email address.'; return; }
 
   btn.disabled = true;
-  btn.textContent = 'Checking…';
+  btn.textContent = 'Sending…';
   try {
-    await loadUsersFromFirestore();
-    const users = getUsers();
-    const match = Object.entries(users).find(([, u]) =>
-      String(u.email || '').trim().toLowerCase() === email &&
-      digitsOnly(u.phone) === phone &&
-      phone.length > 0
-    );
-
-    if (!match) {
-      bumpRecoveryAttempts();
-      errEl.textContent = 'No account matches that email and phone number. Double-check them, or ask a church admin to reset your account.';
+    await auth.sendPasswordResetEmail(email);
+  } catch (err) {
+    // Anything other than a malformed address is reported as success so the
+    // form cannot be used to discover which emails have accounts.
+    if (err.code === 'auth/invalid-email' ||
+        err.code === 'auth/operation-not-allowed' ||
+        err.code === 'auth/configuration-not-found') {
+      errEl.textContent = authErrorMessage(err);
+      btn.disabled = false;
+      btn.textContent = 'Email me a reset link';
       return;
     }
-
-    localStorage.removeItem(RECOVERY_KEY);
-    recoverTarget = match[0];
-    document.getElementById('reset-found').innerHTML =
-      `Your username is <strong>${esc(match[0])}</strong>. Choose a new password below.`;
-    document.getElementById('recover-form').classList.add('hidden');
-    document.getElementById('reset-form').classList.remove('hidden');
-    document.getElementById('reset-password').focus();
-  } catch (err) {
-    console.error('Recovery lookup error:', err);
-    errEl.textContent = 'Could not reach the server — check your connection and try again.';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Find my account';
-  }
-});
-
-// Step 2 — set a new password and sign straight in
-document.getElementById('reset-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const pw    = document.getElementById('reset-password').value;
-  const cf    = document.getElementById('reset-confirm').value;
-  const errEl = document.getElementById('reset-error');
-  const btn   = document.querySelector('#reset-form button[type="submit"]');
-  errEl.textContent = '';
-
-  if (!recoverTarget)  { errEl.textContent = 'Something went wrong — please start again.'; return; }
-  if (pw.length < 6)   { errEl.textContent = 'Password must be at least 6 characters.'; return; }
-  if (pw !== cf)       { errEl.textContent = 'Passwords do not match.'; return; }
-
-  btn.disabled = true;
-  btn.textContent = 'Saving…';
-  try {
-    await loadUsersFromFirestore();
-    const users = getUsers();
-    if (!users[recoverTarget]) { errEl.textContent = 'That account no longer exists.'; return; }
-
-    users[recoverTarget] = { ...users[recoverTarget], password: pw };
-    saveUsers(users);
-
-    const uname = recoverTarget;
-    resetRecoveryView();
-    document.getElementById('recover-view').classList.add('hidden');
-    document.getElementById('signin-view').classList.remove('hidden');
-
-    if (login(uname, pw)) {
-      await storeCredential(uname, pw);
-      showApp(true);
-      logSignIn();
-      showToast('Password updated — you are signed in.', 'info');
-    }
-  } catch (err) {
     console.error('Password reset error:', err);
-    errEl.textContent = 'Could not save your new password — check your connection and try again.';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Set new password';
   }
+  document.getElementById('recover-form').classList.add('hidden');
+  document.getElementById('recover-sent').classList.remove('hidden');
+  document.getElementById('recover-sent-addr').textContent = email;
+  btn.disabled = false;
+  btn.textContent = 'Email me a reset link';
 });
 
 document.getElementById('signup-form').addEventListener('submit', async e => {
@@ -527,7 +584,7 @@ document.getElementById('signup-form').addEventListener('submit', async e => {
 
   errEl.textContent = '';
   if (!firstName || !lastName) { errEl.textContent = 'First and last name are required.'; return; }
-  if (!username)               { errEl.textContent = 'Please choose a username (letters, numbers, dots).'; return; }
+  if (!email)                  { errEl.textContent = 'An email address is required — it is how you sign in and reset your password.'; return; }
   if (!password)               { errEl.textContent = 'Please choose a password.'; return; }
   if (password.length < 6)    { errEl.textContent = 'Password must be at least 6 characters.'; return; }
   if (password !== confirm)   { errEl.textContent = 'Passwords do not match.'; return; }
@@ -535,43 +592,35 @@ document.getElementById('signup-form').addEventListener('submit', async e => {
   btn.disabled = true;
   btn.textContent = 'Creating account…';
 
+  let finishProvision = null;
   try {
-    // Always fetch the latest accounts from Firebase before checking uniqueness
-    await loadUsersFromFirestore();
-    const users = getUsers();
+    // Firebase Auth creates the credential and rejects duplicate emails for us.
+    finishProvision = beginProvisioning();
+    const cred = await auth.createUserWithEmailAndPassword(email.toLowerCase(), password);
+    const uid  = cred.user.uid;
 
-    if (users[username]) {
-      errEl.textContent = 'That username is already taken — please choose another.';
-      return;
-    }
-
-    users[username] = {
-      password,
+    await saveUserProfile(uid, {
       role:            'member',
       displayName:     firstName + ' ' + lastName,
+      username:        username || String(email).split('@')[0].toLowerCase(),
       firstName,
       lastName,
-      email,
+      email:           email.toLowerCase(),
       phone,
       address:         '',
       profileComplete: true,
       lastSeen:        new Date().toISOString()
-    };
-    saveUsers(users);
+    });
 
-    if (login(username, password)) {
-      // Clear all signup fields
-      ['signup-first','signup-last','signup-username','signup-email','signup-phone','signup-password','signup-confirm']
-        .forEach(id => { document.getElementById(id).value = ''; });
-      await storeCredential(username, password);
-      showApp(true);
-      logSignIn();
-      showToast('Welcome, ' + firstName + '! Your account is ready.', 'info');
-    }
+    ['signup-first','signup-last','signup-username','signup-email','signup-phone','signup-password','signup-confirm']
+      .forEach(id => { document.getElementById(id).value = ''; });
+    await storeCredential(email.toLowerCase(), password);
+    showToast('Welcome, ' + firstName + '! Your account is ready.', 'info');
+    // onAuthStateChanged shows the app.
   } catch (err) {
-    errEl.textContent = 'Error creating account — check your connection and try again.';
-    console.error('Signup error:', err);
+    errEl.textContent = authErrorMessage(err);
   } finally {
+    if (finishProvision) finishProvision();
     btn.disabled = false;
     btn.textContent = 'Create Account';
   }
@@ -996,45 +1045,105 @@ function openAccountsModal() {
         </div>`).join('')}
     </div>
     <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Add New Account</p>
-    <div class="form-group"><label class="form-label">Username</label>
-      <input class="form-input" id="new-acct-user" placeholder="e.g. jane.doe" autocapitalize="none" autocorrect="off" /></div>
+    <div class="form-group"><label class="form-label">Email</label>
+      <input class="form-input" id="new-acct-email" type="email" placeholder="member@example.com" autocapitalize="none" autocorrect="off" /></div>
     <div class="form-group"><label class="form-label">Display Name</label>
       <input class="form-input" id="new-acct-display" placeholder="Full name" /></div>
-    <div class="form-group"><label class="form-label">Password</label>
-      <input class="form-input" id="new-acct-pw" type="password" placeholder="Min 6 characters" /></div>
+    <div class="form-group"><label class="form-label">Temporary Password</label>
+      <input class="form-input" id="new-acct-pw" type="text" placeholder="Min 6 characters" autocomplete="off" autocapitalize="none" autocorrect="off" />
+      <button class="form-btn" id="new-acct-gen" type="button" style="margin-top:8px;background:var(--gold-light);color:var(--purple);border:1px solid var(--purple)">&#128273; Generate</button></div>
     <div class="form-group"><label class="form-label">Role</label>
       <select class="form-input" id="new-acct-role">
         <option value="member">Member</option>
         <option value="admin">Admin</option>
       </select></div>
     <button class="form-btn form-btn-primary" id="add-acct-btn">+ Create Account</button>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px">The member signs in with their email and this password, then changes it in Settings.</p>
+    <div id="legacy-migrate-box" style="margin-top:22px;padding-top:16px;border-top:1px solid rgba(32,30,29,.12)"></div>
   `, () => {
+    // Offer the one-time legacy upgrade only while old accounts still exist.
+    accountsRef.once('value').then(snap => {
+      const box = document.getElementById('legacy-migrate-box');
+      if (!box) return;
+      const n = snap.exists() ? Object.keys(snap.val()).length : 0;
+      if (!n) { box.innerHTML = '<p style="font-size:11px;color:#15803d">&#10003; All accounts use Firebase sign-in.</p>'; return; }
+      box.innerHTML = `
+        <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Legacy accounts</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+          ${n} account${n === 1 ? '' : 's'} still use the old password system. Upgrading keeps each member's
+          current password and removes it from the database.
+        </p>
+        <button class="form-btn form-btn-primary" id="migrate-legacy-btn">Upgrade ${n} account${n === 1 ? '' : 's'}</button>`;
+      document.getElementById('migrate-legacy-btn').addEventListener('click', async () => {
+        const b = document.getElementById('migrate-legacy-btn');
+        b.disabled = true;
+        b.textContent = 'Upgrading…';
+        try {
+          const r = await migrateAllLegacyAccounts();
+          showToast(`Upgraded ${r.migrated} of ${r.total}.`, r.skipped.length ? 'error' : 'info');
+          if (r.skipped.length) alert('Could not upgrade:\n\n' + r.skipped.join('\n'));
+          openAccountsModal();
+        } catch (err) {
+          showToast(authErrorMessage(err), 'error');
+          b.disabled = false;
+          b.textContent = 'Retry upgrade';
+        }
+      });
+    }).catch(() => {});
+
     document.querySelectorAll('[data-edit-acct]').forEach(btn => {
       btn.addEventListener('click', () => openEditAccountModal(btn.dataset.editAcct));
     });
     document.querySelectorAll('[data-del-acct]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         const uname = btn.dataset.delAcct;
-        if (!confirm(`Delete account "${uname}"?`)) return;
+        if (!confirm(`Remove "${uname}" from the church directory?\n\nTheir sign-in account stays in Firebase until you delete it under Authentication \u2192 Users in the Firebase console.`)) return;
         const u = getUsers();
-        delete u[uname];
-        saveUsers(u);
+        const uid = u[uname] && u[uname].uid;
+        if (!uid) { showToast('That account has no linked sign-in record.', 'error'); return; }
+        try {
+          await usersRef.child(uid).remove();
+          delete profilesByUid[uid];
+          rebuildUsersCache();
+          showToast('Removed from the directory. Delete their login in the Firebase console to finish.', 'info');
+        } catch {
+          showToast('Could not remove — admin permission required.', 'error');
+        }
         openAccountsModal();
       });
     });
-    document.getElementById('add-acct-btn').addEventListener('click', () => {
-      const username    = document.getElementById('new-acct-user').value.toLowerCase().trim().replace(/\s+/g, '.');
+    document.getElementById('new-acct-gen').addEventListener('click', () => {
+      document.getElementById('new-acct-pw').value = generateTempPassword();
+    });
+    document.getElementById('add-acct-btn').addEventListener('click', async () => {
+      const email       = document.getElementById('new-acct-email').value.trim().toLowerCase();
       const displayName = document.getElementById('new-acct-display').value.trim();
       const password    = document.getElementById('new-acct-pw').value;
       const role        = document.getElementById('new-acct-role').value;
-      if (!username || !password) { showToast('Username and password are required.', 'error'); return; }
-      if (password.length < 6)    { showToast('Password must be at least 6 characters.', 'error'); return; }
-      const u = getUsers();
-      if (u[username])            { showToast('That username already exists.', 'error'); return; }
-      u[username] = { password, role, displayName: displayName || username };
-      saveUsers(u);
-      showToast(`Account "${username}" created! Share the username and password with them.`, 'info');
-      openAccountsModal();
+      if (!email || !password) { showToast('Email and password are required.', 'error'); return; }
+      if (password.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+
+      const btn = document.getElementById('add-acct-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+      try {
+        const uid = await createAuthUserAsAdmin(email, password);
+        await usersRef.child(uid).set({
+          email,
+          username:        email.split('@')[0],
+          displayName:     displayName || email.split('@')[0],
+          role,
+          profileComplete: false
+        });
+        await loadProfiles();
+        showToast(`Account created. Give them: ${email} / ${password}`, 'info');
+        openAccountsModal();
+      } catch (err) {
+        showToast(authErrorMessage(err), 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '+ Create Account';
+      }
     });
   });
 }
@@ -1047,44 +1156,114 @@ function generateTempPassword() {
   return words[r[0] % words.length] + (1000 + (r[1] % 9000));
 }
 
+// Creating a user with the main Firebase app would sign the ADMIN out and in
+// as the new member. A throwaway secondary app avoids touching this session.
+let secondaryApp = null;
+async function createAuthUserAsAdmin(email, password) {
+  if (!secondaryApp) {
+    secondaryApp = firebase.initializeApp(firebaseConfig, 'admin-create');
+  }
+  const secondaryAuth = secondaryApp.auth();
+  try {
+    const cred = await secondaryAuth.createUserWithEmailAndPassword(email, password);
+    return cred.user.uid;
+  } finally {
+    await secondaryAuth.signOut().catch(() => {});
+  }
+}
+
 function openEditAccountModal(username) {
   const users = getUsers();
   const u = users[username];
   if (!u) return;
   openModal('Edit Account', `
-    <div class="form-group"><label class="form-label">Username</label>
-      <input class="form-input" value="${esc(username)}" disabled style="opacity:.55" /></div>
+    <div class="form-group"><label class="form-label">Email (sign-in)</label>
+      <input class="form-input" value="${esc(u.email || '—')}" disabled style="opacity:.55" /></div>
     <div class="form-group"><label class="form-label">Display Name</label>
       <input class="form-input" id="ea-display" value="${esc(u.displayName || '')}" /></div>
-    <div class="form-group"><label class="form-label">New Password</label>
-      <input class="form-input" id="ea-pw" type="text" placeholder="Leave blank to keep current" autocomplete="off" autocapitalize="none" autocorrect="off" />
-      <button class="form-btn" id="ea-gen-pw" type="button" style="margin-top:8px;background:var(--gold-light);color:var(--purple);border:1px solid var(--purple)">&#128273; Generate temporary password</button>
-      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">Read the password out to the member, then have them change it in Settings.</p></div>
     <div class="form-group"><label class="form-label">Role</label>
       <select class="form-input" id="ea-role">
         <option value="member" ${u.role === 'member' ? 'selected' : ''}>Member</option>
         <option value="admin"  ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>
       </select></div>
     <button class="form-btn form-btn-primary" id="ea-save">Save Changes</button>
+    <div class="form-group" style="margin-top:18px">
+      <label class="form-label">Password</label>
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+        Passwords are held by Firebase and cannot be read or set from here.
+        Send a reset link to their inbox instead.
+      </p>
+      <button class="form-btn" id="ea-send-reset" type="button" style="background:var(--gold-light);color:var(--purple);border:1px solid var(--purple)">&#9993; Email a password reset link</button>
+    </div>
     <button class="form-btn" id="ea-back" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back</button>
   `, () => {
-    document.getElementById('ea-gen-pw').addEventListener('click', () => {
-      document.getElementById('ea-pw').value = generateTempPassword();
-      showToast('Temporary password filled in — press Save Changes to apply it.', 'info');
+    document.getElementById('ea-send-reset').addEventListener('click', async () => {
+      if (!u.email) { showToast('No email on file for this member.', 'error'); return; }
+      const btn = document.getElementById('ea-send-reset');
+      btn.disabled = true;
+      try {
+        await auth.sendPasswordResetEmail(u.email);
+        showToast(`Reset link sent to ${u.email}.`, 'info');
+      } catch (err) {
+        showToast(authErrorMessage(err), 'error');
+      } finally {
+        btn.disabled = false;
+      }
     });
-    document.getElementById('ea-save').addEventListener('click', () => {
+    document.getElementById('ea-save').addEventListener('click', async () => {
       const displayName = document.getElementById('ea-display').value.trim();
-      const newPw       = document.getElementById('ea-pw').value;
       const role        = document.getElementById('ea-role').value;
-      if (newPw && newPw.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
-      const u2 = getUsers();
-      u2[username] = { ...u2[username], displayName: displayName || username, role, ...(newPw ? { password: newPw } : {}) };
-      saveUsers(u2);
-      showToast('Account updated!', 'info');
-      openAccountsModal();
+      if (!u.uid) { showToast('That account has no linked sign-in record.', 'error'); return; }
+      try {
+        await usersRef.child(u.uid).update({ displayName: displayName || username, role });
+        await loadProfiles();
+        showToast('Account updated!', 'info');
+        openAccountsModal();
+      } catch {
+        showToast('Could not save — admin permission required.', 'error');
+      }
     });
     document.getElementById('ea-back').addEventListener('click', openAccountsModal);
   });
+}
+
+// One-time bulk upgrade of every remaining plaintext account. Members keep
+// their existing password; it simply moves into Firebase Auth.
+async function migrateAllLegacyAccounts() {
+  const snap = await accountsRef.once('value');
+  if (!snap.exists()) return { migrated: 0, skipped: [], total: 0 };
+  const legacy = snap.val();
+  const names  = Object.keys(legacy);
+  let migrated = 0;
+  const skipped = [];
+
+  for (const name of names) {
+    const rec = legacy[name];
+    const email = String(rec.email || '').trim().toLowerCase();
+    if (!email || !rec.password) { skipped.push(`${name} (no email or password on file)`); continue; }
+    try {
+      const uid = await createAuthUserAsAdmin(email, rec.password);
+      const { password: _pw, ...rest } = rec;
+      await usersRef.child(uid).set({
+        ...rest,
+        email,
+        username:   name,
+        role:       rec.role === 'admin' ? 'admin' : 'member',
+        migratedAt: new Date().toISOString()
+      });
+      await accountsRef.child(name).remove();
+      migrated++;
+    } catch (err) {
+      if (err.code === 'auth/email-already-in-use') {
+        await accountsRef.child(name).remove().catch(() => {});
+        skipped.push(`${name} (already migrated)`);
+      } else {
+        skipped.push(`${name} (${err.code || 'failed'})`);
+      }
+    }
+  }
+  await loadProfiles();
+  return { migrated, skipped, total: names.length };
 }
 
 function openSigninLogModal() {
@@ -2411,11 +2590,11 @@ function openMandatoryProfileModal(user) {
         <input class="form-input" id="ps-phone" type="tel" value="${esc(user && user.phone || '')}" placeholder="(555) 555-5555" />
       </div>
       <div class="form-group">
-        <label class="form-label">New Password *</label>
-        <input class="form-input" id="ps-pw" type="password" placeholder="Create a personal password (min 6 chars)" autocomplete="new-password" />
+        <label class="form-label">New Password</label>
+        <input class="form-input" id="ps-pw" type="password" placeholder="Optional — set your own password" autocomplete="new-password" />
       </div>
       <div class="form-group">
-        <label class="form-label">Confirm Password *</label>
+        <label class="form-label">Confirm Password</label>
         <input class="form-input" id="ps-pw2" type="password" placeholder="Repeat your password" autocomplete="new-password" />
       </div>
       <p class="settings-msg error" id="ps-msg" style="margin-bottom:8px"></p>
@@ -2424,7 +2603,7 @@ function openMandatoryProfileModal(user) {
   `;
   document.body.appendChild(overlay);
 
-  document.getElementById('ps-save-btn').addEventListener('click', () => {
+  document.getElementById('ps-save-btn').addEventListener('click', async () => {
     const firstName = document.getElementById('ps-first').value.trim();
     const lastName  = document.getElementById('ps-last').value.trim();
     const address   = document.getElementById('ps-address').value.trim();
@@ -2433,25 +2612,30 @@ function openMandatoryProfileModal(user) {
     const pw2       = document.getElementById('ps-pw2').value;
     const msgEl     = document.getElementById('ps-msg');
 
-    if (!firstName || !lastName) { msgEl.textContent = 'First and last name are required.'; return; }
-    if (!phone)                   { msgEl.textContent = 'Phone number is required.'; return; }
-    if (!pw)                      { msgEl.textContent = 'Please create a new password.'; return; }
-    if (pw.length < 6)            { msgEl.textContent = 'Password must be at least 6 characters.'; return; }
-    if (pw !== pw2)               { msgEl.textContent = 'Passwords do not match.'; return; }
+    if (!firstName || !lastName)     { msgEl.textContent = 'First and last name are required.'; return; }
+    if (!phone)                       { msgEl.textContent = 'Phone number is required.'; return; }
+    if (pw && pw.length < 6)          { msgEl.textContent = 'Password must be at least 6 characters.'; return; }
+    if (pw && pw !== pw2)             { msgEl.textContent = 'Passwords do not match.'; return; }
 
-    const users = getUsers();
-    if (!users[currentUser.username]) { msgEl.textContent = 'Account error — please sign out and back in.'; return; }
+    const existing = myProfile();
+    if (!existing) { msgEl.textContent = 'Account error — please sign out and back in.'; return; }
+
+    if (pw) {
+      try {
+        await auth.currentUser.updatePassword(pw);
+      } catch (err) {
+        msgEl.textContent = err.code === 'auth/requires-recent-login'
+          ? 'Please sign out and back in before changing your password. Your other details were not saved yet.'
+          : authErrorMessage(err);
+        return;
+      }
+    }
 
     const displayName = firstName + ' ' + lastName;
-    users[currentUser.username] = {
-      ...users[currentUser.username],
-      firstName, lastName, address, phone,
-      displayName, password: pw, profileComplete: true
-    };
-    saveUsers(users);
-
+    await saveUserProfile(currentUser.uid, {
+      ...existing, firstName, lastName, address, phone, displayName, profileComplete: true
+    });
     currentUser.displayName = displayName;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
 
     overlay.remove();
     showToast('Welcome, ' + firstName + '! Your profile is all set.', 'info');
@@ -2522,7 +2706,7 @@ function saveUserSettings(patch) {
   });
 }
 
-function saveProfile() {
+async function saveProfile() {
   const msgEl    = document.getElementById('settings-profile-msg');
   const firstName = document.getElementById('settings-first-name').value.trim();
   const lastName  = document.getElementById('settings-last-name').value.trim();
@@ -2532,11 +2716,9 @@ function saveProfile() {
   const newPw     = document.getElementById('settings-new-pw').value;
   const confirmPw = document.getElementById('settings-confirm-pw').value;
 
-  const users = getUsers();
-  const user  = users[currentUser.username];
-
-  if (!user || user.password !== currentPw) {
-    msgEl.textContent = 'Current password is incorrect.';
+  const user = myProfile();
+  if (!user) {
+    msgEl.textContent = 'Account error — please sign out and back in.';
     msgEl.className = 'settings-msg error';
     return;
   }
@@ -2551,17 +2733,32 @@ function saveProfile() {
     return;
   }
 
+  // Firebase requires proof of the current password before changing it.
+  if (newPw) {
+    if (!currentPw) {
+      msgEl.textContent = 'Enter your current password to change it.';
+      msgEl.className = 'settings-msg error';
+      return;
+    }
+    try {
+      const cred = firebase.auth.EmailAuthProvider.credential(auth.currentUser.email, currentPw);
+      await auth.currentUser.reauthenticateWithCredential(cred);
+      await auth.currentUser.updatePassword(newPw);
+    } catch (err) {
+      msgEl.textContent = (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential')
+        ? 'Current password is incorrect.'
+        : authErrorMessage(err);
+      msgEl.className = 'settings-msg error';
+      return;
+    }
+  }
+
   const displayName = (firstName && lastName) ? firstName + ' ' + lastName : (firstName || lastName || user.displayName || currentUser.username);
-  users[currentUser.username] = {
-    ...user,
-    firstName, lastName, address, phone, displayName,
-    profileComplete: true,
-    ...(newPw ? { password: newPw } : {})
-  };
-  saveUsers(users);
+  await saveUserProfile(currentUser.uid, {
+    ...user, firstName, lastName, address, phone, displayName, profileComplete: true
+  });
 
   currentUser.displayName = displayName;
-  localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
   saveUserSettings({ displayName });
 
   document.getElementById('settings-current-pw').value = '';
@@ -2629,4 +2826,5 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 });
 
 // ── Init ──
-tryAutoLogin();
+// Firebase Auth restores any existing session and fires onAuthStateChanged,
+// which is what boots the app. Nothing to call here.

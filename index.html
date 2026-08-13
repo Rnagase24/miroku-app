@@ -26,36 +26,32 @@
       <div id="signin-view">
         <p class="login-tagline">Sign in to continue</p>
         <form id="login-form">
-          <input class="login-input" id="login-username" type="text" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" />
+          <input class="login-input" id="login-username" type="email" name="email" placeholder="Email address" autocomplete="email" autocapitalize="none" autocorrect="off" />
           <input class="login-input" id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" />
           <p class="login-error" id="login-error"></p>
           <button class="login-btn" type="submit">Sign In</button>
         </form>
-        <p class="login-switch"><button class="login-switch-btn" id="show-recover-btn" type="button">Forgot username or password?</button></p>
+        <p class="login-switch"><button class="login-switch-btn" id="show-recover-btn" type="button">Forgot your password?</button></p>
         <p class="login-switch">New member? <button class="login-switch-btn" id="show-signup-btn" type="button">Create an account</button></p>
       </div>
 
-      <!-- Account Recovery View -->
+      <!-- Password Reset View -->
       <div id="recover-view" class="hidden">
-        <p class="login-tagline">Recover your account</p>
+        <p class="login-tagline">Reset your password</p>
 
-        <!-- Step 1: verify identity -->
         <form id="recover-form">
-          <p class="login-help">Enter the email address and phone number you used when you created your account.</p>
-          <input class="login-input" id="recover-email" type="email" placeholder="Email" autocomplete="email" autocapitalize="none" autocorrect="off" />
-          <input class="login-input" id="recover-phone" type="tel"   placeholder="Phone number" autocomplete="tel" />
+          <p class="login-help">Enter your email address and we'll send you a link to choose a new password.</p>
+          <input class="login-input" id="recover-email" type="email" placeholder="Email address" autocomplete="email" autocapitalize="none" autocorrect="off" />
           <p class="login-error" id="recover-error"></p>
-          <button class="login-btn" type="submit">Find my account</button>
+          <button class="login-btn" type="submit">Email me a reset link</button>
         </form>
 
-        <!-- Step 2: choose a new password -->
-        <form id="reset-form" class="hidden">
-          <p class="login-help" id="reset-found"></p>
-          <input class="login-input" id="reset-password" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
-          <input class="login-input" id="reset-confirm"  type="password" placeholder="Confirm new password" autocomplete="new-password" />
-          <p class="login-error" id="reset-error"></p>
-          <button class="login-btn" type="submit">Set new password</button>
-        </form>
+        <div id="recover-sent" class="hidden">
+          <p class="login-help">
+            If an account exists for <strong id="recover-sent-addr"></strong>, a reset link is on its way.
+            Check your inbox &mdash; and your spam folder, since it may land there the first time.
+          </p>
+        </div>
 
         <p class="login-switch"><button class="login-switch-btn" id="recover-back-btn" type="button">&#8592; Back to sign in</button></p>
       </div>
@@ -68,8 +64,8 @@
             <input class="login-input" id="signup-first" placeholder="First name" autocomplete="given-name" />
             <input class="login-input" id="signup-last"  placeholder="Last name"  autocomplete="family-name" />
           </div>
-          <input class="login-input" id="signup-username" type="text"  placeholder="Choose a username" autocomplete="username" autocapitalize="none" autocorrect="off" />
-          <input class="login-input" id="signup-email"    type="email" placeholder="Email (for reminders)" autocomplete="email" />
+          <input class="login-input" id="signup-username" type="text"  placeholder="Directory name (optional)" autocomplete="username" autocapitalize="none" autocorrect="off" />
+          <input class="login-input" id="signup-email"    type="email" placeholder="Email address (you sign in with this)" autocomplete="email" autocapitalize="none" autocorrect="off" />
           <input class="login-input" id="signup-phone"    type="tel"   placeholder="Phone number" autocomplete="tel" />
           <input class="login-input" id="signup-password" type="password" placeholder="Password (min 6 characters)" autocomplete="new-password" />
           <input class="login-input" id="signup-confirm"  type="password" placeholder="Confirm password" autocomplete="new-password" />
@@ -436,6 +432,7 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
   <script src="app.js"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <script>

@@ -1,0 +1,45 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "church": {
+      "users": {
+        ".read": "auth != null",
+
+        "$uid": {
+          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+
+          "role": {
+            ".validate": "newData.isString() && (newData.val() === 'member' || newData.val() === 'admin') && (root.child('church/users').child(auth.uid).child('role').val() === 'admin' || (!data.exists() && newData.val() === 'member') || newData.val() === data.val())"
+          },
+
+          "email": { ".validate": "newData.isString()" }
+        }
+      },
+
+      "data": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
+      },
+
+      "settings": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      },
+
+      "signinLog": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$entry": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.hasChildren(['uid', 'timestamp']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+
+      "accounts": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
+      }
+    }
+  }
+}
