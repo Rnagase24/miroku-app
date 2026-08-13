@@ -359,6 +359,7 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 // ── Sign Up ──
 document.getElementById('show-signup-btn').addEventListener('click', () => {
   document.getElementById('signin-view').classList.add('hidden');
+  document.getElementById('recover-view').classList.add('hidden');
   document.getElementById('signup-view').classList.remove('hidden');
   document.getElementById('signup-error').textContent = '';
   document.getElementById('signup-first').focus();
@@ -366,8 +367,149 @@ document.getElementById('show-signup-btn').addEventListener('click', () => {
 
 document.getElementById('show-signin-btn').addEventListener('click', () => {
   document.getElementById('signup-view').classList.add('hidden');
+  document.getElementById('recover-view').classList.add('hidden');
   document.getElementById('signin-view').classList.remove('hidden');
   document.getElementById('login-error').textContent = '';
+});
+
+// ── Account Recovery (forgot username / password) ──
+// No backend exists to send reset emails, so identity is proven by matching
+// BOTH the email and phone number recorded on the account at signup.
+const RECOVERY_KEY      = 'miroku-recovery-attempts';
+const RECOVERY_MAX      = 5;
+const RECOVERY_WINDOW_MS = 15 * 60 * 1000;
+let recoverTarget = null;
+
+const digitsOnly = v => String(v || '').replace(/\D/g, '');
+
+function recoveryAttempts() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECOVERY_KEY) || 'null');
+    if (!a || Date.now() - a.first > RECOVERY_WINDOW_MS) return { count: 0, first: Date.now() };
+    return a;
+  } catch { return { count: 0, first: Date.now() }; }
+}
+
+function bumpRecoveryAttempts() {
+  const a = recoveryAttempts();
+  a.count += 1;
+  localStorage.setItem(RECOVERY_KEY, JSON.stringify(a));
+}
+
+function resetRecoveryView() {
+  recoverTarget = null;
+  document.getElementById('recover-form').classList.remove('hidden');
+  document.getElementById('reset-form').classList.add('hidden');
+  ['recover-email','recover-phone','reset-password','reset-confirm']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('recover-error').textContent = '';
+  document.getElementById('reset-error').textContent   = '';
+}
+
+document.getElementById('show-recover-btn').addEventListener('click', () => {
+  resetRecoveryView();
+  document.getElementById('signin-view').classList.add('hidden');
+  document.getElementById('signup-view').classList.add('hidden');
+  document.getElementById('recover-view').classList.remove('hidden');
+  document.getElementById('recover-email').focus();
+});
+
+document.getElementById('recover-back-btn').addEventListener('click', () => {
+  resetRecoveryView();
+  document.getElementById('recover-view').classList.add('hidden');
+  document.getElementById('signin-view').classList.remove('hidden');
+  document.getElementById('login-error').textContent = '';
+});
+
+// Step 1 — look the account up by email + phone
+document.getElementById('recover-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const email = document.getElementById('recover-email').value.trim().toLowerCase();
+  const phone = digitsOnly(document.getElementById('recover-phone').value);
+  const errEl = document.getElementById('recover-error');
+  const btn   = document.querySelector('#recover-form button[type="submit"]');
+  errEl.textContent = '';
+
+  if (recoveryAttempts().count >= RECOVERY_MAX) {
+    errEl.textContent = 'Too many attempts. Please wait 15 minutes, or ask a church admin to reset it for you.';
+    return;
+  }
+  if (!email || !phone) { errEl.textContent = 'Please enter both your email and your phone number.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  try {
+    await loadUsersFromFirestore();
+    const users = getUsers();
+    const match = Object.entries(users).find(([, u]) =>
+      String(u.email || '').trim().toLowerCase() === email &&
+      digitsOnly(u.phone) === phone &&
+      phone.length > 0
+    );
+
+    if (!match) {
+      bumpRecoveryAttempts();
+      errEl.textContent = 'No account matches that email and phone number. Double-check them, or ask a church admin to reset your account.';
+      return;
+    }
+
+    localStorage.removeItem(RECOVERY_KEY);
+    recoverTarget = match[0];
+    document.getElementById('reset-found').innerHTML =
+      `Your username is <strong>${esc(match[0])}</strong>. Choose a new password below.`;
+    document.getElementById('recover-form').classList.add('hidden');
+    document.getElementById('reset-form').classList.remove('hidden');
+    document.getElementById('reset-password').focus();
+  } catch (err) {
+    console.error('Recovery lookup error:', err);
+    errEl.textContent = 'Could not reach the server — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Find my account';
+  }
+});
+
+// Step 2 — set a new password and sign straight in
+document.getElementById('reset-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pw    = document.getElementById('reset-password').value;
+  const cf    = document.getElementById('reset-confirm').value;
+  const errEl = document.getElementById('reset-error');
+  const btn   = document.querySelector('#reset-form button[type="submit"]');
+  errEl.textContent = '';
+
+  if (!recoverTarget)  { errEl.textContent = 'Something went wrong — please start again.'; return; }
+  if (pw.length < 6)   { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  if (pw !== cf)       { errEl.textContent = 'Passwords do not match.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await loadUsersFromFirestore();
+    const users = getUsers();
+    if (!users[recoverTarget]) { errEl.textContent = 'That account no longer exists.'; return; }
+
+    users[recoverTarget] = { ...users[recoverTarget], password: pw };
+    saveUsers(users);
+
+    const uname = recoverTarget;
+    resetRecoveryView();
+    document.getElementById('recover-view').classList.add('hidden');
+    document.getElementById('signin-view').classList.remove('hidden');
+
+    if (login(uname, pw)) {
+      await storeCredential(uname, pw);
+      showApp(true);
+      logSignIn();
+      showToast('Password updated — you are signed in.', 'info');
+    }
+  } catch (err) {
+    console.error('Password reset error:', err);
+    errEl.textContent = 'Could not save your new password — check your connection and try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Set new password';
+  }
 });
 
 document.getElementById('signup-form').addEventListener('submit', async e => {
@@ -536,6 +678,7 @@ function showApp(visible) {
     // Always return to sign-in view on logout
     document.getElementById('signin-view').classList.remove('hidden');
     document.getElementById('signup-view').classList.add('hidden');
+    document.getElementById('recover-view').classList.add('hidden');
     document.getElementById('login-error').textContent = '';
   }
 }
@@ -845,9 +988,11 @@ function openAccountsModal() {
           </div>
           <div style="font-size:11px;color:var(--text-muted)">
             &#128336; ${esc(formatLastSeen(u.lastSeen))}
+            ${u.email ? ' &bull; &#9993; ' + esc(u.email) : ''}
             ${u.phone ? ' &bull; &#128222; ' + esc(u.phone) : ''}
             ${u.address ? ' &bull; &#128205; ' + esc(u.address) : ''}
           </div>
+          ${(!u.email || !u.phone) ? `<div style="font-size:11px;color:#b06a00;margin-top:2px">&#9888; No email/phone on file — this member can't use self-service recovery.</div>` : ''}
         </div>`).join('')}
     </div>
     <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">Add New Account</p>
@@ -894,6 +1039,14 @@ function openAccountsModal() {
   });
 }
 
+// Readable temporary password an admin can say out loud over the phone.
+function generateTempPassword() {
+  const words = ['Light', 'Grace', 'Peace', 'Faith', 'Hope', 'Joy', 'Spirit', 'Harmony', 'Blossom', 'Sunrise'];
+  const r = new Uint32Array(2);
+  crypto.getRandomValues(r);
+  return words[r[0] % words.length] + (1000 + (r[1] % 9000));
+}
+
 function openEditAccountModal(username) {
   const users = getUsers();
   const u = users[username];
@@ -904,7 +1057,9 @@ function openEditAccountModal(username) {
     <div class="form-group"><label class="form-label">Display Name</label>
       <input class="form-input" id="ea-display" value="${esc(u.displayName || '')}" /></div>
     <div class="form-group"><label class="form-label">New Password</label>
-      <input class="form-input" id="ea-pw" type="password" placeholder="Leave blank to keep current" /></div>
+      <input class="form-input" id="ea-pw" type="text" placeholder="Leave blank to keep current" autocomplete="off" autocapitalize="none" autocorrect="off" />
+      <button class="form-btn" id="ea-gen-pw" type="button" style="margin-top:8px;background:var(--gold-light);color:var(--purple);border:1px solid var(--purple)">&#128273; Generate temporary password</button>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">Read the password out to the member, then have them change it in Settings.</p></div>
     <div class="form-group"><label class="form-label">Role</label>
       <select class="form-input" id="ea-role">
         <option value="member" ${u.role === 'member' ? 'selected' : ''}>Member</option>
@@ -913,6 +1068,10 @@ function openEditAccountModal(username) {
     <button class="form-btn form-btn-primary" id="ea-save">Save Changes</button>
     <button class="form-btn" id="ea-back" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back</button>
   `, () => {
+    document.getElementById('ea-gen-pw').addEventListener('click', () => {
+      document.getElementById('ea-pw').value = generateTempPassword();
+      showToast('Temporary password filled in — press Save Changes to apply it.', 'info');
+    });
     document.getElementById('ea-save').addEventListener('click', () => {
       const displayName = document.getElementById('ea-display').value.trim();
       const newPw       = document.getElementById('ea-pw').value;

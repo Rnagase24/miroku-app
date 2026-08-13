@@ -102,6 +102,15 @@ body {
 
 .login-input:focus { border-color: var(--purple-light); }
 
+.login-help {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+  margin-bottom: 14px;
+}
+.login-help strong { color: var(--purple); font-weight: 700; }
+
 .login-error {
   color: #c0392b;
   font-size: 13px;

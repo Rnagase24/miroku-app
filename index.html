@@ -31,7 +31,33 @@
           <p class="login-error" id="login-error"></p>
           <button class="login-btn" type="submit">Sign In</button>
         </form>
+        <p class="login-switch"><button class="login-switch-btn" id="show-recover-btn" type="button">Forgot username or password?</button></p>
         <p class="login-switch">New member? <button class="login-switch-btn" id="show-signup-btn" type="button">Create an account</button></p>
+      </div>
+
+      <!-- Account Recovery View -->
+      <div id="recover-view" class="hidden">
+        <p class="login-tagline">Recover your account</p>
+
+        <!-- Step 1: verify identity -->
+        <form id="recover-form">
+          <p class="login-help">Enter the email address and phone number you used when you created your account.</p>
+          <input class="login-input" id="recover-email" type="email" placeholder="Email" autocomplete="email" autocapitalize="none" autocorrect="off" />
+          <input class="login-input" id="recover-phone" type="tel"   placeholder="Phone number" autocomplete="tel" />
+          <p class="login-error" id="recover-error"></p>
+          <button class="login-btn" type="submit">Find my account</button>
+        </form>
+
+        <!-- Step 2: choose a new password -->
+        <form id="reset-form" class="hidden">
+          <p class="login-help" id="reset-found"></p>
+          <input class="login-input" id="reset-password" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+          <input class="login-input" id="reset-confirm"  type="password" placeholder="Confirm new password" autocomplete="new-password" />
+          <p class="login-error" id="reset-error"></p>
+          <button class="login-btn" type="submit">Set new password</button>
+        </form>
+
+        <p class="login-switch"><button class="login-switch-btn" id="recover-back-btn" type="button">&#8592; Back to sign in</button></p>
       </div>
 
       <!-- Sign Up View -->
