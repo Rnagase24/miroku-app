@@ -242,9 +242,10 @@ async function logout() {
 // ── Default Data ──
 const DEFAULT_DATA = {
   services: [
-    { id: 1, icon: '☀️', title: 'Sunday Morning',    time: '8:00 AM & 10:30 AM'   },
-    { id: 2, icon: '🌆', title: 'Wednesday Evening', time: '6:30 PM — Bible Study' },
-    { id: 3, icon: '💖', title: 'Youth Group',        time: 'Friday 7:00 PM'        }
+    { id: 1, icon: '☀️', title: 'Sunday Service', time: '11:00 AM',
+      recurrence: { weekday: 0, nths: [2, 4] } },
+    { id: 2, icon: '🌆', title: 'Wednesday Evening Teachings', time: '6:30 PM',
+      recurrence: { weekday: 3, nths: [] } }
   ],
   location: {
     address: '123 Faith Avenue',
@@ -889,7 +890,7 @@ function renderDailyMessage() {
   container.innerHTML = `
     <div class="daily-word-card">
       <div class="daily-word-quote">"</div>
-      <div class="daily-word-label">${esc(m.title || 'Daily Word')}</div>
+      <div class="daily-word-label">${esc(m.title || 'Daily Inspiration')}</div>
       <p class="daily-word-text">${esc(m.text)}</p>
       ${m.scripture ? `<p class="daily-word-scripture">— ${esc(m.scripture)}</p>` : ''}
     </div>`;
@@ -901,7 +902,7 @@ function openScheduleModal() {
     .slice()
     .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.scheduledTime.localeCompare(b.scheduledTime));
 
-  openModal('Schedule Daily Word', `
+  openModal('Schedule Daily Inspiration', `
     <p style="font-size:13px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px">New Message</p>
     <div class="form-group">
       <label class="form-label">Date</label>
@@ -913,7 +914,7 @@ function openScheduleModal() {
     </div>
     <div class="form-group">
       <label class="form-label">Title / Label</label>
-      <input class="form-input" id="new-msg-title" value="Daily Word" placeholder="Daily Word" />
+      <input class="form-input" id="new-msg-title" value="Daily Inspiration" placeholder="Daily Inspiration" />
     </div>
     <div class="form-group">
       <label class="form-label">Message</label>
@@ -932,7 +933,7 @@ function openScheduleModal() {
           <div class="scheduled-msg-row">
             <div class="scheduled-msg-info">
               <div class="scheduled-msg-date">${esc(m.scheduledDate)}${m.scheduledTime ? ' &bull; ' + esc(m.scheduledTime) : ''}</div>
-              <div class="scheduled-msg-preview">${esc(m.title || 'Daily Word')}: ${esc(m.text.length > 55 ? m.text.substring(0,55) + '…' : m.text)}</div>
+              <div class="scheduled-msg-preview">${esc(m.title || 'Daily Inspiration')}: ${esc(m.text.length > 55 ? m.text.substring(0,55) + '…' : m.text)}</div>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
               <button class="card-action-btn" data-edit-msg="${m.id}">&#9998;</button>
@@ -984,7 +985,7 @@ function openEditMessageModal(id) {
     </div>
     <div class="form-group">
       <label class="form-label">Title / Label</label>
-      <input class="form-input" id="edit-msg-title" value="${esc(m.title || 'Daily Word')}" />
+      <input class="form-input" id="edit-msg-title" value="${esc(m.title || 'Daily Inspiration')}" />
     </div>
     <div class="form-group">
       <label class="form-label">Message</label>
@@ -1359,28 +1360,123 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
 });
 
 // ── HOME: Service Times ──
+// ── Service recurrence ──
+// A service may carry a rule like { weekday: 0, nths: [2, 4] } meaning
+// "2nd and 4th Sunday". Omit nths for a plain weekly service. Dates are
+// worked out on the fly so the list never needs updating by hand.
+const WEEKDAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const ORDINALS      = { 1:'1st', 2:'2nd', 3:'3rd', 4:'4th', 5:'5th' };
+
+// The nth given weekday of a month, or null when that month has no such date
+// (e.g. a 5th Sunday). Uses local time so it matches the member's calendar.
+function nthWeekdayOfMonth(year, month, weekday, nth) {
+  const first  = new Date(year, month, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  const d = new Date(year, month, 1 + offset + (nth - 1) * 7);
+  return d.getMonth() === month ? d : null;
+}
+
+function upcomingServiceDates(rec, count = 3, from = new Date()) {
+  if (!rec || typeof rec.weekday !== 'number') return [];
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const out = [];
+
+  if (!Array.isArray(rec.nths) || !rec.nths.length) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + ((rec.weekday - d.getDay() + 7) % 7));
+    while (out.length < count) { out.push(new Date(d)); d.setDate(d.getDate() + 7); }
+    return out;
+  }
+
+  const nths = [...rec.nths].sort((a, b) => a - b);
+  let y = today.getFullYear(), m = today.getMonth();
+  for (let guard = 0; guard < 24 && out.length < count; guard++) {
+    for (const n of nths) {
+      if (out.length >= count) break;
+      const d = nthWeekdayOfMonth(y, m, rec.weekday, n);
+      if (d && d >= today) out.push(d);
+    }
+    if (++m > 11) { m = 0; y++; }
+  }
+  return out;
+}
+
+function describeRecurrence(rec) {
+  if (!rec || typeof rec.weekday !== 'number') return '';
+  const day = WEEKDAY_NAMES[rec.weekday];
+  if (!Array.isArray(rec.nths) || !rec.nths.length) return `Every ${day}`;
+  const parts = [...rec.nths].sort((a, b) => a - b).map(n => ORDINALS[n] || n + 'th');
+  const joined = parts.length > 1
+    ? parts.slice(0, -1).join(', ') + ' & ' + parts[parts.length - 1]
+    : parts[0];
+  return `${joined} ${day}`;
+}
+
+const fmtServiceDate = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
 function renderServices() {
-  document.getElementById('services-list').innerHTML = (appData.services || []).map(s => `
+  document.getElementById('services-list').innerHTML = (appData.services || []).map(s => {
+    const schedule = [describeRecurrence(s.recurrence), s.time].filter(Boolean).join(' · ');
+    const next     = upcomingServiceDates(s.recurrence, 3);
+    const upcoming = next.length ? `
+      <p class="card-next">Next: <strong>${esc(fmtServiceDate(next[0]))}</strong>${
+        next.length > 1 ? ' &middot; then ' + next.slice(1).map(d => esc(fmtServiceDate(d))).join(', ') : ''
+      }</p>` : '';
+    return `
     <div class="card">
       <div class="card-icon">${esc(s.icon)}</div>
-      <div class="card-body"><h4>${esc(s.title)}</h4><p>${esc(s.time)}</p></div>
-    </div>
-  `).join('') || '<p style="color:var(--text-muted)">No service times added yet.</p>';
+      <div class="card-body">
+        <h4>${esc(s.title)}</h4>
+        <p>${esc(schedule)}</p>
+        ${upcoming}
+      </div>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-muted)">No service times added yet.</p>';
 }
+
+// Recompute dates when the app comes back to the foreground, so a device left
+// open overnight doesn't keep showing yesterday's "next" service.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && document.getElementById('services-list')) renderServices();
+});
 
 document.getElementById('edit-services-btn').addEventListener('click', openServicesModal);
 
 function openServicesModal() { openModal('Edit Service Times', buildServicesForm()); }
 
 function buildServicesForm() {
-  const rows = (appData.services || []).map((s, i) => `
-    <div class="service-row" data-id="${s.id}">
-      <input class="svc-icon-input"  value="${esc(s.icon)}"  placeholder="☀️" data-idx="${i}" />
-      <input class="svc-title-input" value="${esc(s.title)}" placeholder="Title" data-idx="${i}" />
-      <input class="svc-time-input"  value="${esc(s.time)}"  placeholder="Time"  data-idx="${i}" />
-      <button class="service-row-del" data-id="${s.id}">✕</button>
-    </div>
-  `).join('');
+  const rows = (appData.services || []).map((s, i) => {
+    const rec  = s.recurrence || {};
+    const nths = Array.isArray(rec.nths) ? rec.nths : [];
+    const hasR = typeof rec.weekday === 'number';
+    const preview = hasR
+      ? upcomingServiceDates(rec, 3).map(fmtServiceDate).join(', ') || 'no upcoming dates'
+      : 'No repeat set — this service shows without dates.';
+    return `
+    <div class="service-row-group" data-id="${s.id}">
+      <div class="service-row">
+        <input class="svc-icon-input"  value="${esc(s.icon)}"  placeholder="☀️" data-idx="${i}" />
+        <input class="svc-title-input" value="${esc(s.title)}" placeholder="Title" data-idx="${i}" />
+        <input class="svc-time-input"  value="${esc(s.time)}"  placeholder="Time"  data-idx="${i}" />
+        <button class="service-row-del" data-id="${s.id}">✕</button>
+      </div>
+      <div class="svc-repeat">
+        <label class="svc-repeat-label">Repeats on</label>
+        <select class="svc-weekday">
+          <option value="">Doesn't repeat</option>
+          ${WEEKDAY_NAMES.map((w, wi) =>
+            `<option value="${wi}" ${hasR && rec.weekday === wi ? 'selected' : ''}>${w}</option>`).join('')}
+        </select>
+        <div class="svc-nths">
+          ${[1,2,3,4,5].map(n =>
+            `<label class="svc-nth"><input type="checkbox" class="svc-nth-box" value="${n}" ${nths.includes(n) ? 'checked' : ''} /> ${ORDINALS[n]}</label>`
+          ).join('')}
+        </div>
+        <p class="svc-hint">Tick none to repeat <em>every</em> week.</p>
+        <p class="svc-preview">Upcoming: ${esc(preview)}</p>
+      </div>
+    </div>`;
+  }).join('');
   return `
     <div id="services-form-list">${rows}</div>
     <button class="form-btn form-btn-primary" id="add-svc-row-btn" style="margin-top:4px">+ Add Service Time</button>
@@ -1388,7 +1484,29 @@ function buildServicesForm() {
   `;
 }
 
+// Read the recurrence controls out of one form row.
+function readRecurrenceFrom(group) {
+  const wd = group.querySelector('.svc-weekday').value;
+  if (wd === '') return null;
+  const nths = [...group.querySelectorAll('.svc-nth-box')]
+    .filter(b => b.checked).map(b => parseInt(b.value, 10));
+  return { weekday: parseInt(wd, 10), nths };
+}
+
 function bindServicesForm() {
+  // Live-update the "Upcoming" preview as the admin changes the rule.
+  document.querySelectorAll('.service-row-group').forEach(group => {
+    const refresh = () => {
+      const rec = readRecurrenceFrom(group);
+      const el  = group.querySelector('.svc-preview');
+      el.textContent = rec
+        ? 'Upcoming: ' + (upcomingServiceDates(rec, 3).map(fmtServiceDate).join(', ') || 'no upcoming dates')
+        : 'No repeat set — this service shows without dates.';
+    };
+    group.querySelector('.svc-weekday').addEventListener('change', refresh);
+    group.querySelectorAll('.svc-nth-box').forEach(b => b.addEventListener('change', refresh));
+  });
+
   document.querySelectorAll('.service-row-del').forEach(btn => {
     btn.addEventListener('click', () => {
       appData.services = appData.services.filter(s => s.id !== parseInt(btn.dataset.id, 10));
@@ -1404,11 +1522,14 @@ function bindServicesForm() {
   });
   const saveBtn = document.getElementById('save-svc-btn');
   if (saveBtn) saveBtn.addEventListener('click', () => {
-    document.querySelectorAll('.service-row').forEach((row, i) => {
+    document.querySelectorAll('.service-row-group').forEach((group, i) => {
       if (!appData.services[i]) return;
-      appData.services[i].icon  = row.querySelector('.svc-icon-input').value.trim();
-      appData.services[i].title = row.querySelector('.svc-title-input').value.trim();
-      appData.services[i].time  = row.querySelector('.svc-time-input').value.trim();
+      appData.services[i].icon  = group.querySelector('.svc-icon-input').value.trim();
+      appData.services[i].title = group.querySelector('.svc-title-input').value.trim();
+      appData.services[i].time  = group.querySelector('.svc-time-input').value.trim();
+      const rec = readRecurrenceFrom(group);
+      if (rec) appData.services[i].recurrence = rec;
+      else     delete appData.services[i].recurrence;
     });
     saveData(); closeModal();
   });
