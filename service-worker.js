@@ -1,4 +1,4 @@
-const CACHE = 'miroku-la-v15';
+const CACHE = 'miroku-la-v16';
 
 // Install: activate immediately without waiting
 self.addEventListener('install', () => self.skipWaiting());

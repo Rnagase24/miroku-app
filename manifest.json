@@ -1,24 +1,31 @@
 {
-  "name": "Miroku LA Church",
-  "short_name": "Miroku LA",
-  "description": "Miroku LA Church mobile app — services, events, directory, and media.",
-  "start_url": "/FSI-Creating-a-Choose-Your-Own-Adventure-Game/index.html",
+  "name": "Miroku App",
+  "short_name": "Miroku App",
+  "description": "Miroku LA Church — services, events, directory, and media.",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#4a1c6e",
-  "theme_color": "#4a1c6e",
+  "background_color": "#f5ead8",
+  "theme_color": "#c67139",
   "orientation": "portrait",
   "icons": [
     {
       "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
