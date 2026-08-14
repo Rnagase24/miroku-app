@@ -36,6 +36,24 @@
         }
       },
 
+      "prayerRequests": {
+        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$req": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.hasChildren(['prayerText', 'submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+
+      "soreiRequests": {
+        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$req": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.hasChildren(['submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+
       "accounts": {
         ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
         ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"

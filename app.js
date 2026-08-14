@@ -15,6 +15,10 @@ const churchRef    = db.ref('church/data');
 const settingsRef  = db.ref('church/settings');
 const accountsRef  = db.ref('church/accounts');
 const signinLogRef = db.ref('church/signinLog');
+// Member submissions live outside church/data: that node is admin-write only,
+// and prayer requests are private to the person who sent them.
+const prayerRequestsRef = db.ref('church/prayerRequests');
+const soreiRequestsRef  = db.ref('church/soreiRequests');
 
 // ── Auth (Firebase Authentication) ──
 // Credentials live in Firebase Auth (Google hashes the passwords); profile and
@@ -1993,9 +1997,11 @@ function openPrayerSubmitModal(formId) {
       const text      = document.getElementById('pr-text').value.trim();
       const ancestors = form.type === 'ancestors' ? (document.getElementById('pr-ancestors') || {}).value || '' : '';
       if (!name || !text) { showToast('Please enter your name and prayer request.', 'error'); return; }
-      if (!appData.prayerRequests) appData.prayerRequests = [];
-      appData.prayerRequests.push({
-        id:             nextId(appData.prayerRequests),
+      const btn = document.getElementById('submit-prayer-btn');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      prayerRequestsRef.push({
+        uid:            currentUser ? currentUser.uid : '',
         formId:         form.id,
         formTitle:      form.title,
         memberUsername: currentUser ? currentUser.username : '',
@@ -2003,20 +2009,57 @@ function openPrayerSubmitModal(formId) {
         ancestorNames:  ancestors.trim(),
         prayerText:     text,
         submittedAt:    new Date().toISOString()
+      }).then(() => {
+        closeModal();
+        showToast('Your prayer request has been submitted. God bless you!', 'info');
+      }).catch(err => {
+        console.error('Prayer request error:', err);
+        btn.disabled = false;
+        btn.innerHTML = '&#128591; Submit Prayer Request';
+        showToast('Could not send your request — please check your connection and try again.', 'error');
       });
-      saveData();
-      closeModal();
-      showToast('Your prayer request has been submitted. God bless you!', 'info');
     });
   });
 }
 
 function openPrayerInboxModal() {
-  const requests = ensureArray(appData.prayerRequests)
-    .slice().sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  openModal('Prayer Inbox', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  prayerRequestsRef.once('value')
+    .then(async snap => {
+      const live = [];
+      snap.forEach(c => live.push(c.val()));
+
+      // Requests submitted before prayer requests moved out of church/data are
+      // still readable by every member. Move them across and clear the old
+      // copy now that an admin (who can write both) is here.
+      const legacy = ensureArray(appData.prayerRequests);
+      if (legacy.length) {
+        try {
+          for (const r of legacy) await prayerRequestsRef.push(r);
+          appData.prayerRequests = [];
+          await churchRef.child('prayerRequests').set([]);
+          legacy.forEach(r => live.push(r));
+        } catch (err) {
+          console.error('Prayer request migration failed:', err);
+          legacy.forEach(r => live.push(r));
+        }
+      }
+      renderPrayerInbox(live);
+    })
+    .catch(err => {
+      console.error('Prayer inbox error:', err);
+      document.getElementById('modal-body').innerHTML =
+        '<p style="color:#c0392b;font-size:14px">Could not load prayer requests. Admin access is required.</p>';
+    });
+}
+
+function renderPrayerInbox(all) {
+  const requests = all.slice()
+    .sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
 
   if (!requests.length) {
-    openModal('Prayer Inbox', '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:24px 0">No prayer requests yet.</p>', () => {});
+    document.getElementById('modal-body').innerHTML =
+      '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:24px 0">No prayer requests yet.</p>';
     return;
   }
 
@@ -2043,7 +2086,7 @@ function openPrayerInboxModal() {
       </div>`;
     }).join('');
   }
-  openModal('Prayer Inbox', html, () => {});
+  document.getElementById('modal-body').innerHTML = html;
 }
 
 function openPrayerFormEditor(id) {
@@ -2538,16 +2581,16 @@ function openServiceRequestModal(entryId, ancId) {
         submittedAt:    new Date().toISOString()
       };
 
-      if (!appData.soreiRequests) appData.soreiRequests = [];
-      appData.soreiRequests.push(request);
-      saveData();
-
-      if (type === 'shinrei') {
-        printShireiSaishiLetter(entry, anc, deathDate);
-      }
-
-      closeModal();
-      showToast('Service request submitted! Please contact your minister to schedule.', 'info');
+      soreiRequestsRef.push({ ...request, uid: currentUser ? currentUser.uid : '' })
+        .then(() => {
+          if (type === 'shinrei') printShireiSaishiLetter(entry, anc, deathDate);
+          closeModal();
+          showToast('Service request submitted! Please contact your minister to schedule.', 'info');
+        })
+        .catch(err => {
+          console.error('Service request error:', err);
+          showToast('Could not send your request — please check your connection and try again.', 'error');
+        });
     });
   });
 }
