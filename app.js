@@ -2934,25 +2934,11 @@ async function saveProfile() {
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
 }
 
-async function handleNotifToggle(key, enabled) {
-  if (!enabled) {
-    updateNotifPref(key, false);
-    return;
-  }
-
-  if (!('Notification' in window)) {
-    alert('Your browser does not support notifications.');
-    document.getElementById('notif-' + key).checked = false;
-    return;
-  }
-
-  const permission = await Notification.requestPermission();
-  if (permission === 'granted') {
-    updateNotifPref(key, true);
-  } else {
-    document.getElementById('notif-' + key).checked = false;
-    alert('Please enable notifications in your device settings for this app.');
-  }
+// Push notifications are not implemented yet — there is no sender anywhere in
+// the app. Until there is, record the member's preference but don't ask the
+// browser for notification permission, since nothing would ever use it.
+function handleNotifToggle(key, enabled) {
+  updateNotifPref(key, enabled);
 }
 
 function updateNotifPref(key, value) {

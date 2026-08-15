@@ -1601,3 +1601,16 @@ body.is-admin .card-actions { display: flex; }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Notice shown while push notifications are not yet implemented. */
+.settings-coming-soon {
+  background: var(--gold-light);
+  border: 1px solid var(--purple);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.settings-coming-soon strong { color: var(--purple); }
