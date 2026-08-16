@@ -3464,8 +3464,10 @@ function initSettings() {
     document.getElementById('settings-save-btn').addEventListener('click', saveProfile);
   }
 
-  // Notification toggles
-  ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'].forEach(key => {
+  // Notification toggles. Driven by NOTIF_KEYS — a second hardcoded list here
+  // silently left new toggles with no listener, so they appeared to switch on
+  // but saved nothing.
+  NOTIF_KEYS.forEach(key => {
     const el = document.getElementById('notif-' + key);
     if (!el) return;
     el.replaceWith(el.cloneNode(true));
