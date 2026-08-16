@@ -32,10 +32,24 @@ admin.initializeApp({
 });
 const db = admin.database();
 
+// Secrets are pasted by hand, often from a phone, so strip whitespace and any
+// stray base64 padding rather than failing on an invisible character.
+const cleanKey = v => String(v || '').trim().replace(/\s+/g, '').replace(/=+$/, '');
+const vapidPublic  = cleanKey(process.env.VAPID_PUBLIC_KEY);
+const vapidPrivate = cleanKey(process.env.VAPID_PRIVATE_KEY);
+
+// Report the shape, never the value, so a bad secret is obvious in the log.
+console.log(`VAPID public key: ${vapidPublic.length} chars (expected 87)`);
+console.log(`VAPID private key: ${vapidPrivate.length} chars (expected 43)`);
+if (vapidPublic.length !== 87 || vapidPrivate.length !== 43) {
+  console.error('A VAPID key looks wrong. Re-copy it from PUSH-SETUP.md into the repository secret — no spaces or line breaks.');
+  process.exit(1);
+}
+
 webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || 'mailto:info@mirokuLA.org',
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
+  String(process.env.VAPID_SUBJECT || 'mailto:info@mirokuLA.org').trim(),
+  vapidPublic,
+  vapidPrivate
 );
 
 // ── date helpers, all in the church's timezone ──
