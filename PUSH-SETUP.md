@@ -56,14 +56,18 @@ can't register for notifications.
    → **Run workflow**.
 4. The run log lists exactly who was sent to and who was skipped.
 
-The schedule runs every 15 minutes, so a message can arrive up to 15 minutes
-after its scheduled time. GitHub sometimes delays scheduled runs when busy.
+The schedule runs every 5 minutes, GitHub's minimum. It is not exact — GitHub
+delays scheduled runs when it is busy, so in practice expect a message within
+about ten minutes of its scheduled time rather than on the dot.
 
 ## What gets sent
 
 - **Daily Inspiration** — when a scheduled message's time arrives.
 - **Service Times** — on the morning of a service (from 8am), worked out from
   the recurrence rule, so 2nd and 4th Sundays only.
+- **One-on-One meetings** — a new request goes to the ministers (with the
+  member's phone), the decision goes to the member, and both are reminded 24
+  hours and 1 hour before a confirmed meeting.
 
 Members only receive a type they've switched on in Settings. Everything sent is
 recorded under `church/pushLog`, so nothing is ever sent twice however often

@@ -4,7 +4,10 @@ name: Send push notifications
 # that has come due since the last run.
 on:
   schedule:
-    - cron: '*/15 * * * *'   # every 15 minutes
+    # Every 5 minutes — GitHub's minimum. It does not run to the second: under
+    # load these fire late, so treat this as "within roughly ten minutes of the
+    # scheduled time" rather than exact.
+    - cron: '*/5 * * * *'
   workflow_dispatch:          # lets you trigger a run by hand to test
 
 concurrency:
