@@ -9,7 +9,9 @@ on:
 
 concurrency:
   group: push-notifications
-  cancel-in-progress: false
+  # A new run supersedes one still in flight, so a stuck job can never block
+  # the next send.
+  cancel-in-progress: true
 
 jobs:
   send:
