@@ -181,8 +181,10 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
         });
       }
 
-      // The decision, sent to the member.
-      if (a.status === 'approved') {
+      // The decision, sent to the member. Bounded to meetings still ahead, so
+      // enabling notifications later cannot dredge up old outcomes.
+      const stillAhead = new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`).getTime() > Date.now();
+      if (a.status === 'approved' && stillAhead) {
         jobs.push({
           key: `apptok-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
           title: isJohrei ? 'Johrei session confirmed' : 'Meeting confirmed',
@@ -190,7 +192,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
               + `${a.mode === 'online' ? 'online (Zoom)' : 'in person'}.`
         });
       }
-      if (a.status === 'declined') {
+      if (a.status === 'declined' && stillAhead) {
         jobs.push({
           key: `apptno-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
           title: `Your ${kind} request was not approved`,
@@ -241,12 +243,16 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     }
   }
 
-  const due = jobs.filter(j => !sentLog[j.key]);
+  // Only a job that actually reached somebody counts as delivered. Recording a
+  // sent-to-nobody job as done meant that switching a preference on afterwards
+  // could never recover the notification.
+  const delivered = k => sentLog[k] && (sentLog[k].sent || 0) > 0;
+  const due = jobs.filter(j => !delivered(j.key));
   if (!due.length) {
     // Distinguish "nothing is scheduled for now" from "it went out already" —
     // reading the first as the second sends you hunting for a bug that is not there.
     console.log(jobs.length
-      ? `Nothing new to send — ${jobs.length} due item(s) already went out earlier.`
+      ? `Nothing new to send — ${jobs.length} due item(s) already reached their recipients.`
       : 'Nothing due right now (no message scheduled for today, and no service today).');
     return;
   }
@@ -271,7 +277,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       }
     }
     await db.ref('church/pushLog').child(job.key).set({ sentAt: new Date().toISOString(), sent });
-    console.log(`${job.key}: sent ${sent}, skipped ${skipped} (pref off)`);
+    console.log(`${job.key}: sent ${sent}, skipped ${skipped} (notification turned off)`
+      + (sent === 0 ? ' — will retry until someone receives it' : ''));
   }
 
   for (const uid of [...new Set(stale)]) {
