@@ -3445,7 +3445,7 @@ function initSettings() {
   // Load notification prefs from settingsRef
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
-    const prefs = ((data[currentUser.username]) || {}).notifPrefs || {};
+    const prefs = (data[currentUser.uid] || data[currentUser.username] || {}).notifPrefs || {};
     NOTIF_KEYS.forEach(key => {
       const el = document.getElementById('notif-' + key);
       if (el) el.checked = !!(prefs[key]);
@@ -3481,7 +3481,9 @@ function initSettings() {
 function saveUserSettings(patch) {
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
-    data[currentUser.username] = Object.assign(data[currentUser.username] || {}, patch);
+    // Keyed by uid, not username: the username is derived in two places and a
+    // mismatch silently loses the setting.
+    data[currentUser.uid] = Object.assign(data[currentUser.uid] || data[currentUser.username] || {}, patch);
     settingsRef.set(data);
   }).catch(() => {
     // localStorage fallback
@@ -3750,10 +3752,10 @@ async function handleNotifToggle(key, enabled) {
 function updateNotifPref(key, value) {
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
-    const userSettings = data[currentUser.username] || {};
+    const userSettings = data[currentUser.uid] || data[currentUser.username] || {};
     userSettings.notifPrefs = userSettings.notifPrefs || {};
     userSettings.notifPrefs[key] = value;
-    data[currentUser.username] = userSettings;
+    data[currentUser.uid] = userSettings;      // uid, never a derived username
     settingsRef.set(data);
   }).catch(() => {
     const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');

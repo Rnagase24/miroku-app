@@ -110,12 +110,32 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // resolve through the profile list.
   const usersSnap = await db.ref('church/users').once('value');
   const users = usersSnap.val() || {};
+  // Settings are keyed by uid. Older records were keyed by a derived username,
+  // so fall back to that until every device has written a uid-keyed entry.
   const prefsFor = uid => {
-    const profile = users[uid];
-    if (!profile) return {};
-    const byName = settings[profile.username] || settings[(profile.email || '').split('@')[0]] || {};
-    return byName.notifPrefs || {};
+    const profile = users[uid] || {};
+    const entry = settings[uid]
+               || settings[profile.username]
+               || settings[(profile.email || '').split('@')[0]]
+               || {};
+    return entry.notifPrefs || {};
   };
+
+  // One compact line per subscriber so a mismatch is visible in the log rather
+  // than guessed at. Masked: these logs are public on a public repository.
+  const mask = v => { const t = String(v || ''); return t ? t.slice(0, 2) + '…(' + t.length + ')' : '(none)'; };
+  console.log('— subscribers —');
+  for (const uid of Object.keys(subs)) {
+    const profile = users[uid] || {};
+    const via = settings[uid] ? 'uid'
+              : settings[profile.username] ? 'username'
+              : settings[(profile.email || '').split('@')[0]] ? 'email-prefix'
+              : 'NO SETTINGS ENTRY';
+    const p = prefsFor(uid);
+    console.log(`  ${mask(uid)} role=${profile.role || '?'} settingsVia=${via} `
+      + `on=[${Object.keys(p).filter(k => p[k] === true).join(',') || 'none'}]`);
+  }
+  console.log(`— settings entries: ${Object.keys(settings).length} —`);
 
   const jobs = [];
 
@@ -277,7 +297,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       }
     }
     await db.ref('church/pushLog').child(job.key).set({ sentAt: new Date().toISOString(), sent });
-    console.log(`${job.key}: sent ${sent}, skipped ${skipped} (notification turned off)`
+    console.log(`${job.key}: sent ${sent}`
+      + (skipped ? `, skipped ${skipped} (notification turned off)` : '')
       + (sent === 0 ? ' — will retry until someone receives it' : ''));
   }
 
