@@ -167,14 +167,17 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
       const phone = a.memberPhone ? ` Call ${a.memberPhone}.` : '';
       const nameOf = a.memberName || 'A member';
+      const isJohrei = a.type === 'johrei';
+      const kind   = isJohrei ? 'Johrei session' : 'meeting';
+      const extra  = a.withJohrei ? ' plus 15 min Johrei' : '';
 
       // A request the minister has not yet acted on — tell them it arrived.
       if (a.status === 'pending' && adminUids.length) {
         jobs.push({
           key: `apptnew-${uid}-${apptId}`, pref: 'oneonone', to: adminUids,
-          title: 'New meeting request',
-          body: `${nameOf} asked for ${a.duration} min ${a.mode === 'online' ? 'online' : 'in person'}, `
-              + `${whenLabel(a)}.${phone}`
+          title: isJohrei ? 'New Johrei request' : 'New meeting request',
+          body: `${nameOf} asked for a ${a.duration} min ${isJohrei ? 'Johrei session' : 'meeting'}${extra} `
+              + `${a.mode === 'online' ? 'online' : 'in person'}, ${whenLabel(a)}.${phone}`
         });
       }
 
@@ -182,15 +185,15 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       if (a.status === 'approved') {
         jobs.push({
           key: `apptok-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
-          title: 'Meeting confirmed',
-          body: `Your minister confirmed ${whenLabel(a)} — ${a.duration} min, `
+          title: isJohrei ? 'Johrei session confirmed' : 'Meeting confirmed',
+          body: `Your minister confirmed ${whenLabel(a)} — ${a.duration} min${extra}, `
               + `${a.mode === 'online' ? 'online (Zoom)' : 'in person'}.`
         });
       }
       if (a.status === 'declined') {
         jobs.push({
           key: `apptno-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
-          title: 'Meeting request not approved',
+          title: `Your ${kind} request was not approved`,
           body: (a.declineReason || 'Your minister could not make that time.')
               + (a.suggestedAlternative ? ` Suggested instead: ${a.suggestedAlternative}` : '')
         });
@@ -226,14 +229,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       // Above an hour out, send the day-before reminder. Inside the final hour
       // only the 1-hour one is relevant — "tomorrow" would be plainly wrong.
       if (minsAway <= 24 * 60 && minsAway > 60) {
-        push2('appt24', 'Meeting tomorrow',
-          `Your one-on-one with your minister is ${when} — ${a.duration} min, ${how}.`,
-          `One-on-one with ${who}, ${when} — ${a.duration} min, ${how}.${phone}`);
+        push2('appt24', isJohrei ? 'Johrei tomorrow' : 'Meeting tomorrow',
+          `Your ${kind} with your minister is ${when} — ${a.duration} min${extra}, ${how}.`,
+          `${isJohrei ? 'Johrei' : 'One-on-one'} with ${who}, ${when} — ${a.duration} min${extra}, ${how}.${phone}`);
       }
       if (minsAway <= 60) {
-        push2('appt1', 'Meeting in 1 hour',
-          `Your one-on-one with your minister is at ${when} — ${how}.`,
-          `One-on-one with ${who} at ${when} — ${how}.${phone}`);
+        push2('appt1', isJohrei ? 'Johrei in 1 hour' : 'Meeting in 1 hour',
+          `Your ${kind} with your minister is at ${when} — ${how}.`,
+          `${isJohrei ? 'Johrei' : 'One-on-one'} with ${who} at ${when} — ${how}.${phone}`);
       }
     }
   }

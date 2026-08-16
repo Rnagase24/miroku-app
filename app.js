@@ -307,6 +307,12 @@ const DEFAULT_DATA = {
   ],
   prayerRequests: [],
   soreiRequests:  [],
+  johreiSessions: [
+    { id: 1, icon: '\u2600\ufe0f', title: 'Johrei after Sunday Service', time: '12:15 PM',
+      recurrence: { weekday: 0, nths: [2, 4] } },
+    { id: 2, icon: '\ud83d\udd4a\ufe0f', title: 'Midweek Johrei', time: '6:00 PM',
+      recurrence: { weekday: 3, nths: [] } }
+  ],
   oneOnOne: {
     zoomUrl:   'https://us02web.zoom.us/launch/jc/86125800160',
     meetingId: '861 2580 0160',
@@ -339,6 +345,7 @@ function subscribeData() {
       appData.prayerForms    = ensureArray(appData.prayerForms,    DEFAULT_DATA.prayerForms);
       appData.prayerRequests = ensureArray(appData.prayerRequests);
       appData.soreiRequests  = ensureArray(appData.soreiRequests);
+      appData.johreiSessions = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
@@ -748,15 +755,22 @@ function showApp(visible) {
     initInstallBanner();
     renderNotifStatus();
 
-    ['request-meeting-btn', 'oneonone-inbox-btn'].forEach(id => {
+    const wire = {
+      'request-meeting-btn':  () => openRequestMeetingModal('oneonone'),
+      'oneonone-inbox-btn':   openMeetingRequestsModal,
+      'request-johrei-btn':   openRequestJohreiModal,
+      'johrei-requests-btn':  openMeetingRequestsModal,
+      'edit-johrei-btn':      openJohreiScheduleModal
+    };
+    Object.entries(wire).forEach(([id, fn]) => {
       const b = document.getElementById(id);
       if (!b) return;
       const fresh = b.cloneNode(true);      // drop listeners from a previous sign-in
       b.replaceWith(fresh);
-      fresh.addEventListener('click',
-        id === 'request-meeting-btn' ? openRequestMeetingModal : openMeetingRequestsModal);
+      fresh.addEventListener('click', fn);
     });
     renderMyMeetings();
+    renderMyJohrei();
     const schedBtn = document.getElementById('schedule-word-btn');
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
@@ -871,6 +885,7 @@ function navigateToTab(tab) {
 
 function navigateToMoreSection(section) {
   if (section === 'oneonone') renderMyMeetings();
+  if (section === 'johrei')   { renderJohreiSchedule(); renderMyJohrei(); }
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + section).classList.add('active');
   // Show back bar for this section
@@ -974,6 +989,7 @@ function renderAll() {
   renderDailyMessage();
   renderLiveEvents();
   renderServices();
+  renderJohreiSchedule();
   renderLocation();
   renderContact();
   renderEvents();
@@ -1563,6 +1579,118 @@ document.getElementById('edit-services-btn').addEventListener('click', openServi
 
 function openServicesModal() { openModal('Edit Service Times', buildServicesForm()); }
 
+// ── Johrei session times ──
+// Same recurrence engine as Service Times, so "2nd & 4th Sunday" and the
+// upcoming dates work identically.
+function renderJohreiSchedule() {
+  const box = document.getElementById('johrei-schedule-list');
+  if (!box) return;
+  const items = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
+  box.innerHTML = items.map(j => {
+    const schedule = [describeRecurrence(j.recurrence), j.time].filter(Boolean).join(' · ');
+    const next     = upcomingServiceDates(j.recurrence, 3);
+    return `
+    <div class="card">
+      <div class="card-icon">${esc(j.icon || '\u2600\ufe0f')}</div>
+      <div class="card-body">
+        <h4>${esc(j.title)}</h4>
+        <p>${esc(schedule)}</p>
+        ${next.length ? `<p class="card-next">Next: <strong>${esc(fmtServiceDate(next[0]))}</strong>${
+          next.length > 1 ? ' &middot; then ' + next.slice(1).map(d => esc(fmtServiceDate(d))).join(', ') : ''
+        }</p>` : ''}
+      </div>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-muted);font-size:14px">No regular Johrei times listed yet.</p>';
+}
+
+function openJohreiScheduleModal() { openModal('Edit Johrei Times', buildJohreiForm()); }
+
+function buildJohreiForm() {
+  const items = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
+  const rows = items.map((j, i) => {
+    const rec  = j.recurrence || {};
+    const nths = Array.isArray(rec.nths) ? rec.nths : [];
+    const hasR = typeof rec.weekday === 'number';
+    const preview = hasR
+      ? upcomingServiceDates(rec, 3).map(fmtServiceDate).join(', ') || 'no upcoming dates'
+      : 'No repeat set.';
+    return `
+    <div class="service-row-group" data-jid="${j.id}">
+      <div class="service-row">
+        <input class="svc-icon-input"  value="${esc(j.icon || '')}"  placeholder="&#9728;&#65039;" />
+        <input class="svc-title-input" value="${esc(j.title || '')}" placeholder="Title" />
+        <input class="svc-time-input"  value="${esc(j.time || '')}"  placeholder="Time" />
+        <button class="johrei-row-del" data-jid="${j.id}">&#10005;</button>
+      </div>
+      <div class="svc-repeat">
+        <label class="svc-repeat-label">Repeats on</label>
+        <select class="svc-weekday">
+          <option value="">Doesn't repeat</option>
+          ${WEEKDAY_NAMES.map((w, wi) =>
+            `<option value="${wi}" ${hasR && rec.weekday === wi ? 'selected' : ''}>${w}</option>`).join('')}
+        </select>
+        <div class="svc-nths">
+          ${[1,2,3,4,5].map(n =>
+            `<label class="svc-nth"><input type="checkbox" class="svc-nth-box" value="${n}" ${nths.includes(n) ? 'checked' : ''} /> ${ORDINALS[n]}</label>`
+          ).join('')}
+        </div>
+        <p class="svc-hint">Tick none to repeat <em>every</em> week.</p>
+        <p class="svc-preview">Upcoming: ${esc(preview)}</p>
+      </div>
+    </div>`;
+  }).join('');
+  return `
+    <div id="johrei-form-list">${rows}</div>
+    <button class="form-btn form-btn-primary" id="add-johrei-row-btn" style="margin-top:4px">+ Add Johrei Time</button>
+    <button class="form-btn form-btn-primary" id="save-johrei-btn" style="margin-top:8px">Save</button>
+  `;
+}
+
+function bindJohreiForm() {
+  document.querySelectorAll('#johrei-form-list .service-row-group').forEach(group => {
+    const refresh = () => {
+      const rec = readRecurrenceFrom(group);
+      group.querySelector('.svc-preview').textContent = rec
+        ? 'Upcoming: ' + (upcomingServiceDates(rec, 3).map(fmtServiceDate).join(', ') || 'no upcoming dates')
+        : 'No repeat set.';
+    };
+    group.querySelector('.svc-weekday').addEventListener('change', refresh);
+    group.querySelectorAll('.svc-nth-box').forEach(b => b.addEventListener('change', refresh));
+  });
+
+  document.querySelectorAll('.johrei-row-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      appData.johreiSessions = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions)
+        .filter(j => j.id !== parseInt(btn.dataset.jid, 10));
+      document.getElementById('modal-body').innerHTML = buildJohreiForm();
+      bindJohreiForm();
+    });
+  });
+
+  const addBtn = document.getElementById('add-johrei-row-btn');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    appData.johreiSessions = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
+    appData.johreiSessions.push({ id: nextId(appData.johreiSessions), icon: '\u2600\ufe0f', title: 'Johrei', time: '' });
+    document.getElementById('modal-body').innerHTML = buildJohreiForm();
+    bindJohreiForm();
+  });
+
+  const saveBtn = document.getElementById('save-johrei-btn');
+  if (saveBtn) saveBtn.addEventListener('click', () => {
+    const items = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
+    document.querySelectorAll('#johrei-form-list .service-row-group').forEach((group, i) => {
+      if (!items[i]) return;
+      items[i].icon  = group.querySelector('.svc-icon-input').value.trim();
+      items[i].title = group.querySelector('.svc-title-input').value.trim();
+      items[i].time  = group.querySelector('.svc-time-input').value.trim();
+      const rec = readRecurrenceFrom(group);
+      if (rec) items[i].recurrence = rec; else delete items[i].recurrence;
+    });
+    appData.johreiSessions = items;
+    saveData(); closeModal();
+  });
+}
+
 function buildServicesForm() {
   const rows = (appData.services || []).map((s, i) => {
     const rec  = s.recurrence || {};
@@ -1701,20 +1829,28 @@ function oneOnOneConfig() {
   return Object.assign({}, DEFAULT_DATA.oneOnOne, appData.oneOnOne || {});
 }
 
-function renderMyMeetings() {
-  const box = document.getElementById('my-meetings-list');
+function renderMyMeetings() { renderMyAppointments('oneonone'); }
+function renderMyJohrei()   { renderMyAppointments('johrei'); }
+
+// Older records predate the type field; treat those as one-on-one meetings.
+const apptType = a => a.type === 'johrei' ? 'johrei' : 'oneonone';
+
+function renderMyAppointments(type) {
+  const box = document.getElementById(APPT_TYPES[type].listId);
   if (!box || !currentUser) return;
   appointmentsRef.child(currentUser.uid).once('value').then(snap => {
     const list = [];
     snap.forEach(c => list.push({ id: c.key, ...c.val() }));
-    list.sort((a, b) => meetingDate(b) - meetingDate(a));
+    const mine = list.filter(a => apptType(a) === type)
+                     .sort((a, b) => meetingDate(b) - meetingDate(a));
 
-    if (!list.length) {
-      box.innerHTML = '<p style="color:var(--text-muted);font-size:14px">You have no meetings yet.</p>';
+    if (!mine.length) {
+      box.innerHTML = `<p style="color:var(--text-muted);font-size:14px">You have no ${
+        type === 'johrei' ? 'Johrei sessions' : 'meetings'} yet.</p>`;
       return;
     }
     const cfg = oneOnOneConfig();
-    box.innerHTML = list.map(a => {
+    box.innerHTML = mine.map(a => {
       const st = STATUS_LABELS[a.status] || STATUS_LABELS.pending;
       const showJoin = a.status === 'approved' && a.mode === 'online';
       return `
@@ -1723,7 +1859,8 @@ function renderMyMeetings() {
           <div>
             <h4 style="font-size:15px;font-weight:600">${esc(formatMeetingWhen(a))}</h4>
             <p style="font-size:13px;color:var(--text-muted)">
-              ${esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull; ${a.duration} min &bull;
+              ${type === 'johrei' ? 'Johrei' : esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull;
+              ${a.duration} min${a.withJohrei ? ` + ${JOHREI_MINUTES} min Johrei` : ''} &bull;
               ${a.mode === 'online' ? 'Online' : 'In person'}
             </p>
           </div>
@@ -1750,15 +1887,15 @@ function renderMyMeetings() {
     }).join('');
 
     box.querySelectorAll('[data-cancel-appt]').forEach(btn => {
-      btn.addEventListener('click', () => cancelMeeting(btn.dataset.cancelAppt));
+      btn.addEventListener('click', () => cancelMeeting(btn.dataset.cancelAppt, type));
     });
   }).catch(err => {
     console.error('Meetings load error:', err);
-    box.innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load your meetings.</p>';
+    box.innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load these yet.</p>';
   });
 }
 
-async function cancelMeeting(id) {
+async function cancelMeeting(id, type = 'oneonone') {
   const snap = await appointmentsRef.child(currentUser.uid).child(id).once('value');
   const appt = snap.val();
   if (!appt) return;
@@ -1769,36 +1906,56 @@ async function cancelMeeting(id) {
   if (!confirm('Cancel this meeting with your minister?')) return;
   await appointmentsRef.child(currentUser.uid).child(id)
     .update({ status: 'cancelled', cancelledAt: new Date().toISOString() });
-  showToast('Meeting cancelled. Your minister has been notified.', 'info');
-  renderMyMeetings();
+  showToast('Cancelled. Your minister has been notified.', 'info');
+  renderMyAppointments(type);
 }
 
-function openRequestMeetingModal() {
+const APPT_TYPES = {
+  oneonone: { label: 'Meeting',        listId: 'my-meetings-list', title: 'Request a Meeting' },
+  johrei:   { label: 'Johrei session', listId: 'my-johrei-list',   title: 'Request a Johrei Session' }
+};
+const JOHREI_MINUTES = 15;
+
+function openRequestJohreiModal() { openRequestMeetingModal('johrei'); }
+
+function openRequestMeetingModal(type = 'oneonone') {
   const p = myProfile() || {};
   const name = p.displayName || currentUser.displayName || '';
-  openModal('Request a Meeting', `
+  const isJohrei = type === 'johrei';
+  openModal(APPT_TYPES[type].title, `
     <div class="form-group"><label class="form-label">Your Name</label>
       <input class="form-input" id="oo-name" value="${esc(name)}" placeholder="Your full name" /></div>
 
-    <div class="form-group"><label class="form-label">How would you like to meet?</label>
+    <div class="form-group"><label class="form-label">${isJohrei ? 'How would you like to receive Johrei?' : 'How would you like to meet?'}</label>
       <select class="form-input" id="oo-mode">
-        <option value="online">Online (Zoom)</option>
         <option value="inperson">In person</option>
+        <option value="online">Online (Zoom)</option>
       </select></div>
 
-    <div class="form-group"><label class="form-label">Purpose of the meeting</label>
-      <select class="form-input" id="oo-purpose">
-        <option value="guidance">Guidance</option>
-        <option value="johrei">Johrei</option>
-        <option value="prayer">Prayer</option>
-        <option value="all">All of the above</option>
-      </select></div>
+    ${isJohrei ? `
+      <div class="form-group">
+        <p style="font-size:13px;color:var(--text-muted);line-height:1.5">
+          A Johrei session lasts ${JOHREI_MINUTES} minutes.
+        </p>
+      </div>` : `
+      <div class="form-group"><label class="form-label">Purpose of the meeting</label>
+        <select class="form-input" id="oo-purpose">
+          <option value="guidance">Guidance</option>
+          <option value="johrei">Johrei</option>
+          <option value="prayer">Prayer</option>
+          <option value="all">All of the above</option>
+        </select></div>
 
-    <div class="form-group"><label class="form-label">How long?</label>
-      <select class="form-input" id="oo-duration">
-        <option value="30">30 minutes</option>
-        <option value="60">1 hour</option>
-      </select></div>
+      <div class="form-group"><label class="form-label">How long?</label>
+        <select class="form-input" id="oo-duration">
+          <option value="30">30 minutes</option>
+          <option value="60">1 hour</option>
+        </select></div>
+
+      <label class="booking-check" style="border:1px solid rgba(32,30,29,.12);border-radius:12px;padding:10px 12px;margin-bottom:14px">
+        <input type="checkbox" id="oo-addjohrei" />
+        <span>Add ${JOHREI_MINUTES} minutes of Johrei to this meeting</span>
+      </label>`}
 
     <div class="form-group"><label class="form-label">Preferred date and time</label>
       <input class="form-input" id="oo-when" type="datetime-local" min="${earliestBookingValue()}" />
@@ -1812,7 +1969,7 @@ function openRequestMeetingModal() {
       <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack1" />
         <span>I understand this request must be at least ${BOOKING_NOTICE_HOURS} hours in advance.</span></label>
       <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack2" />
-        <span>I understand my minister must approve the date, time and length before it is confirmed.</span></label>
+        <span>I understand my minister must approve the date${isJohrei ? ' and time' : ', time and length'} before it is confirmed.</span></label>
       <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack3" />
         <span>I understand I can cancel in the app up to ${CANCEL_CUTOFF_HOURS} hours before, and after that I should contact my minister directly.</span></label>
     </div>
@@ -1850,9 +2007,11 @@ function openRequestMeetingModal() {
           memberName:  name,
           memberEmail: currentUser.email || '',
           memberPhone: (myProfile() || {}).phone || '',
+          type:        type,
           mode:        document.getElementById('oo-mode').value,
-          purpose:     document.getElementById('oo-purpose').value,
-          duration:    parseInt(document.getElementById('oo-duration').value, 10),
+          purpose:     isJohrei ? 'johrei' : document.getElementById('oo-purpose').value,
+          duration:    isJohrei ? JOHREI_MINUTES : parseInt(document.getElementById('oo-duration').value, 10),
+          withJohrei:  !isJohrei && !!(document.getElementById('oo-addjohrei') || {}).checked,
           date:        `${chosen.getFullYear()}-${pad(chosen.getMonth()+1)}-${pad(chosen.getDate())}`,
           time:        `${pad(chosen.getHours())}:${pad(chosen.getMinutes())}`,
           notes:       document.getElementById('oo-notes').value.trim(),
@@ -1862,6 +2021,7 @@ function openRequestMeetingModal() {
         closeModal();
         showToast('Request sent. Your minister will confirm it shortly.', 'info');
         renderMyMeetings();
+        renderMyJohrei();
       } catch (err) {
         console.error('Meeting request error:', err);
         msg.textContent = 'Could not send your request — please check your connection.';
@@ -1894,7 +2054,8 @@ function openMeetingRequestsModal() {
         </div>
         <div class="prayer-inbox-date">${esc(formatMeetingWhen(a))}</div>
         <div style="font-size:12px;color:var(--text-muted);margin:4px 0">
-          ${esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull; ${a.duration} min &bull;
+          ${apptType(a) === 'johrei' ? '<strong>Johrei</strong>' : esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull;
+          ${a.duration} min${a.withJohrei ? ` + ${JOHREI_MINUTES} min Johrei` : ''} &bull;
           ${a.mode === 'online' ? 'Online' : 'In person'}
         </div>
         ${a.memberPhone ? `<div style="font-size:12px;margin:2px 0 4px">
@@ -3591,6 +3752,7 @@ function openModal(title, bodyHtml, onReady) {
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('modal-card').scrollTop = 0;
   if (title === 'Edit Service Times') bindServicesForm();
+  if (title === 'Edit Johrei Times')  bindJohreiForm();
   if (onReady) onReady();
 }
 
