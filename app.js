@@ -1730,6 +1730,12 @@ function renderMyMeetings() {
           <span style="font-size:11px;font-weight:700;color:${st.color};white-space:nowrap">${esc(st.text)}</span>
         </div>
         ${a.notes ? `<p style="font-size:13px;color:var(--text-muted)">&ldquo;${esc(a.notes)}&rdquo;</p>` : ''}
+        ${a.status === 'declined' && (a.declineReason || a.suggestedAlternative) ? `
+          <div class="decline-note">
+            ${a.declineReason ? `<p><strong>From your minister:</strong> ${esc(a.declineReason)}</p>` : ''}
+            ${a.suggestedAlternative ? `<p style="margin-top:6px"><strong>Suggested instead:</strong> ${esc(a.suggestedAlternative)}</p>` : ''}
+            <p style="margin-top:8px;font-size:12px;color:var(--text-muted)">Use &ldquo;Request a Meeting&rdquo; above to book the new time.</p>
+          </div>` : ''}
         ${showJoin ? `
           <a class="donation-give-btn" href="${esc(cfg.zoomUrl)}" target="_blank" rel="noopener"
              style="display:block;text-align:center;text-decoration:none;font-size:15px;padding:12px">Join on Zoom</a>
@@ -1890,8 +1896,11 @@ function openMeetingRequestsModal() {
         <div style="font-size:12px;color:var(--text-muted);margin:4px 0">
           ${esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull; ${a.duration} min &bull;
           ${a.mode === 'online' ? 'Online' : 'In person'}
-          ${a.memberPhone ? ' &bull; ' + esc(a.memberPhone) : ''}
         </div>
+        ${a.memberPhone ? `<div style="font-size:12px;margin:2px 0 4px">
+          <a href="tel:${esc(String(a.memberPhone).replace(/[^0-9+]/g, ''))}"
+             style="color:var(--purple-light);font-weight:600;text-decoration:none">&#128222; ${esc(a.memberPhone)}</a>
+        </div>` : ''}
         ${a.notes ? `<div class="prayer-inbox-text">${esc(a.notes)}</div>` : ''}
         ${a.status === 'pending' ? `
           <div style="display:flex;gap:6px;margin-top:8px">
@@ -1931,12 +1940,65 @@ function openMeetingRequestsModal() {
         });
       });
     };
-    decide('data-appt-ok', 'approved', 'Meeting approved. The member will be reminded before it starts.');
-    decide('data-appt-no', 'declined', 'Request declined.');
+    decide('data-appt-ok', 'approved', 'Meeting approved. The member will be told and reminded before it starts.');
+
+    // Declining always carries a reason and, ideally, an alternative — a bare
+    // "no" leaves the member with nothing to act on.
+    document.querySelectorAll('[data-appt-no]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const [uid, id] = btn.getAttribute('data-appt-no').split('|');
+        openDeclineMeetingModal(uid, id);
+      });
+    });
   }).catch(err => {
     console.error('Requests load error:', err);
     document.getElementById('modal-body').innerHTML =
       '<p style="color:#c0392b;font-size:14px">Could not load requests. Admin access required.</p>';
+  });
+}
+
+function openDeclineMeetingModal(uid, id) {
+  openModal('Decline Meeting', `
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:14px">
+      The member will be sent your reply, so they know what happened and what to do next.
+    </p>
+    <div class="form-group"><label class="form-label">Reason *</label>
+      <textarea class="form-textarea" id="dec-reason" style="min-height:80px"
+                placeholder="e.g. I have a service at that time."></textarea></div>
+    <div class="form-group"><label class="form-label">Suggest another day or time</label>
+      <input class="form-input" id="dec-alt" placeholder="e.g. Thursday after 3pm, or Saturday morning" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">
+        Optional, but it saves the member guessing.</p></div>
+    <p class="settings-msg error" id="dec-msg" style="margin-bottom:8px"></p>
+    <button class="form-btn form-btn-primary" id="dec-send">Send Reply &amp; Decline</button>
+    <button class="form-btn" id="dec-back" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back</button>
+  `, () => {
+    document.getElementById('dec-back').addEventListener('click', openMeetingRequestsModal);
+    document.getElementById('dec-send').addEventListener('click', async () => {
+      const reason = document.getElementById('dec-reason').value.trim();
+      const alt    = document.getElementById('dec-alt').value.trim();
+      const msg    = document.getElementById('dec-msg');
+      if (!reason) { msg.textContent = 'Please give the member a reason.'; return; }
+
+      const btn = document.getElementById('dec-send');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        await appointmentsRef.child(uid).child(id).update({
+          status: 'declined',
+          declineReason: reason,
+          suggestedAlternative: alt,
+          decidedAt: new Date().toISOString(),
+          decidedBy: currentUser.username
+        });
+        showToast('Reply sent to the member.', 'info');
+        openMeetingRequestsModal();
+      } catch {
+        msg.textContent = 'Could not save — admin permission required.';
+        btn.disabled = false;
+        btn.textContent = 'Send Reply & Decline';
+      }
+    });
   });
 }
 

@@ -1692,3 +1692,13 @@ body.is-admin .card-actions { display: flex; }
   accent-color: var(--purple);
 }
 .form-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.decline-note {
+  background: #fdecea;
+  border: 1px solid #e8b4ae;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.decline-note strong { color: #a5342a; }

@@ -8,8 +8,9 @@
  * Two kinds of notification:
  *   dailyword — a scheduled Daily Inspiration whose time has arrived
  *   services  — a reminder on the morning of a service
- *   oneonone  — 24 hours and 1 hour before an approved minister meeting,
- *               sent to the member and to every minister (admin)
+ *   oneonone  — a new request (to ministers), the minister's decision (to the
+ *               member), and 24-hour / 1-hour reminders before an approved
+ *               meeting (to both)
  *
  * Everything already delivered is recorded under church/pushLog so a message
  * is never sent twice, however often this runs.
@@ -156,9 +157,46 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     .filter(([, p]) => p && p.role === 'admin')
     .map(([uid]) => uid);
 
+  const whenLabel = a => new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`)
+    .toLocaleString('en-US', { timeZone: CHURCH_TZ, weekday: 'short', month: 'short',
+                               day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
   for (const [uid, appts] of Object.entries(apptsByUser)) {
     for (const [apptId, a] of Object.entries(appts || {})) {
-      if (!a || a.status !== 'approved' || !a.date || !a.time) continue;
+      if (!a || !a.date || !a.time) continue;
+
+      const phone = a.memberPhone ? ` Call ${a.memberPhone}.` : '';
+      const nameOf = a.memberName || 'A member';
+
+      // A request the minister has not yet acted on — tell them it arrived.
+      if (a.status === 'pending' && adminUids.length) {
+        jobs.push({
+          key: `apptnew-${uid}-${apptId}`, pref: 'oneonone', to: adminUids,
+          title: 'New meeting request',
+          body: `${nameOf} asked for ${a.duration} min ${a.mode === 'online' ? 'online' : 'in person'}, `
+              + `${whenLabel(a)}.${phone}`
+        });
+      }
+
+      // The decision, sent to the member.
+      if (a.status === 'approved') {
+        jobs.push({
+          key: `apptok-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
+          title: 'Meeting confirmed',
+          body: `Your minister confirmed ${whenLabel(a)} — ${a.duration} min, `
+              + `${a.mode === 'online' ? 'online (Zoom)' : 'in person'}.`
+        });
+      }
+      if (a.status === 'declined') {
+        jobs.push({
+          key: `apptno-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
+          title: 'Meeting request not approved',
+          body: (a.declineReason || 'Your minister could not make that time.')
+              + (a.suggestedAlternative ? ` Suggested instead: ${a.suggestedAlternative}` : '')
+        });
+      }
+
+      if (a.status !== 'approved') continue;   // reminders are for confirmed meetings only
 
       // The stored date/time is the church's local wall clock.
       const meetingMs = new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`).getTime();
@@ -190,12 +228,12 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       if (minsAway <= 24 * 60 && minsAway > 60) {
         push2('appt24', 'Meeting tomorrow',
           `Your one-on-one with your minister is ${when} — ${a.duration} min, ${how}.`,
-          `One-on-one with ${who}, ${when} — ${a.duration} min, ${how}.`);
+          `One-on-one with ${who}, ${when} — ${a.duration} min, ${how}.${phone}`);
       }
       if (minsAway <= 60) {
         push2('appt1', 'Meeting in 1 hour',
           `Your one-on-one with your minister is at ${when} — ${how}.`,
-          `One-on-one with ${who} at ${when} — ${how}.`);
+          `One-on-one with ${who} at ${when} — ${how}.${phone}`);
       }
     }
   }
