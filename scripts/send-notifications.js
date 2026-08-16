@@ -137,6 +137,17 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   }
   console.log(`— settings entries: ${Object.keys(settings).length} —`);
 
+  // Server-side truth about what is actually stored, so a "sent" request that
+  // appears nowhere can be confirmed or ruled out from the log.
+  const apptTotal = Object.values(apptsByUser)
+    .reduce((n, byId) => n + Object.keys(byId || {}).length, 0);
+  console.log(`— appointments: ${apptTotal} across ${Object.keys(apptsByUser).length} member(s) —`);
+  for (const [auid, byId] of Object.entries(apptsByUser)) {
+    for (const [aid, a] of Object.entries(byId || {})) {
+      console.log(`  ${mask(auid)}/${mask(aid)} ${a.type || 'oneonone'} ${a.status} ${a.date} ${a.time}`);
+    }
+  }
+
   const jobs = [];
 
   // 1. Daily Inspiration — any scheduled message whose moment has passed today.

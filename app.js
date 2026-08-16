@@ -2003,7 +2003,7 @@ function openRequestMeetingModal(type = 'oneonone') {
       submit.textContent = 'Sending…';
       const pad = n => String(n).padStart(2, '0');
       try {
-        await appointmentsRef.child(currentUser.uid).push({
+        const ref = await appointmentsRef.child(currentUser.uid).push({
           uid:         currentUser.uid,
           memberName:  name,
           memberEmail: currentUser.email || '',
@@ -2019,13 +2019,24 @@ function openRequestMeetingModal(type = 'oneonone') {
           status:      'pending',
           createdAt:   new Date().toISOString()
         });
+
+        // Read it back before claiming success. A write that is accepted
+        // locally but not stored server-side would otherwise show "sent" for a
+        // request that exists nowhere.
+        const check = await appointmentsRef.child(currentUser.uid).child(ref.key).once('value');
+        if (!check.exists()) {
+          throw new Error('The request did not save. Please try again or contact your minister.');
+        }
+
         closeModal();
         showToast('Request sent. Your minister will confirm it shortly.', 'info');
         renderMyMeetings();
         renderMyJohrei();
       } catch (err) {
         console.error('Meeting request error:', err);
-        msg.textContent = 'Could not send your request — please check your connection.';
+        msg.textContent = err && err.message && err.message.includes('did not save')
+          ? err.message
+          : `Could not send your request (${(err && (err.code || err.message)) || 'unknown error'}). Please try again.`;
         submit.disabled = false;
         submit.textContent = 'Confirm Request';
       }
@@ -2042,6 +2053,7 @@ function openMeetingRequestsModal() {
       userNode.forEach(c => all.push({ uid: userNode.key, id: c.key, ...c.val() }));
     });
     all.sort((a, b) => meetingDate(a) - meetingDate(b));
+    console.log(`Requests inbox: ${all.length} appointment(s) across ${snap.numChildren()} member(s)`);
     const pending = all.filter(a => a.status === 'pending');
     const rest    = all.filter(a => a.status !== 'pending');
 
