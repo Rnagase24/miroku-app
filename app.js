@@ -738,6 +738,7 @@ function showApp(visible) {
     subscribeData();
     initSettings();
     initInstallBanner();
+    renderNotifStatus();
     const schedBtn = document.getElementById('schedule-word-btn');
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
@@ -3034,6 +3035,9 @@ async function saveProfile() {
 // secret and is only used by the scheduled sender workflow.
 const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'];
 
+// Bumped with the service worker so the status panel reveals a stale install.
+const APP_VERSION = 'v22';
+
 const VAPID_PUBLIC_KEY = 'BGq8bv1aasEYZI8pQTLKT7LO0BQUiK5jiX3SI8xlDFqOpGRvkKq4b-m2mR2YcRTEjcv5C16n6Y1C-3hl6K0YeE4';
 
 function urlBase64ToUint8Array(base64) {
@@ -3148,18 +3152,46 @@ window.addEventListener('appinstalled', () => {
   document.getElementById('install-banner')?.classList.add('hidden');
 });
 
+// Shows exactly why notifications are or aren't working on THIS device.
+// Without it a failure is invisible: the toggle just quietly does nothing.
+async function renderNotifStatus() {
+  const el = document.getElementById('notif-status');
+  if (!el) return;
+  const tail = ` <span style="opacity:.6">(app ${APP_VERSION})</span>`;
+  const bad  = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#c0392b'; };
+  const good = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#15803d'; };
+
+  if (!pushSupported())            return bad('<strong>Not available.</strong> This browser cannot receive notifications.');
+  if (isIOS() && !isInstalled())   return bad('<strong>Add to Home Screen first.</strong> On iPhone, notifications only work from the installed app — tap Share, then "Add to Home Screen", and open it from there.');
+  if (Notification.permission === 'denied')
+                                   return bad('<strong>Blocked.</strong> Allow notifications for this app in your phone settings, then switch one on below.');
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub)                      return bad('<strong>Not set up on this device.</strong> Switch on a notification below to register this phone.');
+    const saved = await pushSubsRef.child(currentUser.uid).once('value');
+    if (!saved.exists())           return bad('<strong>Almost there.</strong> This phone is registered but not saved to the church database — switch a notification off and on again.');
+    good('<strong>Active on this device.</strong> You will receive the notifications ticked below.');
+  } catch (err) {
+    bad('<strong>Could not check.</strong> ' + esc(err.message || 'Unknown error'));
+  }
+}
+
 async function handleNotifToggle(key, enabled) {
   const el = document.getElementById('notif-' + key);
   if (!enabled) {
     updateNotifPref(key, false);
     if (!anyNotifPrefOn()) await removePushSubscription();
+    renderNotifStatus();
     return;
   }
 
   const res = await ensurePushSubscription();
-  if (res.ok) { updateNotifPref(key, true); return; }
+  if (res.ok) { updateNotifPref(key, true); renderNotifStatus(); return; }
 
   if (el) el.checked = false;
+  renderNotifStatus();
   if (res.reason === 'ios-needs-install') {
     showToast('On iPhone, add the app to your Home Screen first to receive notifications.', 'error');
     showInstallBanner(true);
