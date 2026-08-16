@@ -9,6 +9,11 @@ on:
     # scheduled time" rather than exact.
     - cron: '*/5 * * * *'
   workflow_dispatch:          # lets you trigger a run by hand to test
+  push:
+    # Also run on every push to main. The scheduler is unreliable under load,
+    # and the "Run workflow" button is hard to reach on a phone; this gives a
+    # dependable way to force a run.
+    branches: [main]
 
 concurrency:
   group: push-notifications
