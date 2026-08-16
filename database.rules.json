@@ -54,6 +54,14 @@
         }
       },
 
+      "pushSubs": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$uid": {
+          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+          ".validate": "!newData.exists() || (newData.hasChildren(['endpoint', 'p256dh', 'auth']) && $uid === auth.uid)"
+        }
+      },
+
       "accounts": {
         ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
         ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"

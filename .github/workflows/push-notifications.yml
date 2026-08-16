@@ -1,0 +1,34 @@
+name: Send push notifications
+
+# Free on public repositories. Runs on a schedule and sends any notification
+# that has come due since the last run.
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 minutes
+  workflow_dispatch:          # lets you trigger a run by hand to test
+
+concurrency:
+  group: push-notifications
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install web-push@3 firebase-admin@12 --no-audit --no-fund
+
+      - name: Send due notifications
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          DATABASE_URL: https://miroku-app-915e2-default-rtdb.firebaseio.com
+        run: node scripts/send-notifications.js

@@ -19,6 +19,7 @@ const signinLogRef = db.ref('church/signinLog');
 // and prayer requests are private to the person who sent them.
 const prayerRequestsRef = db.ref('church/prayerRequests');
 const soreiRequestsRef  = db.ref('church/soreiRequests');
+const pushSubsRef       = db.ref('church/pushSubs');
 
 // ── Auth (Firebase Authentication) ──
 // Credentials live in Firebase Auth (Google hashes the passwords); profile and
@@ -736,6 +737,7 @@ function showApp(visible) {
     document.body.classList.toggle('is-admin', isAdmin());
     subscribeData();
     initSettings();
+    initInstallBanner();
     const schedBtn = document.getElementById('schedule-word-btn');
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
@@ -2911,7 +2913,6 @@ function initSettings() {
   setVal('settings-phone',      user.phone);
 
   // Load notification prefs from settingsRef
-  const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'];
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
     const prefs = ((data[currentUser.username]) || {}).notifPrefs || {};
@@ -3027,11 +3028,146 @@ async function saveProfile() {
   setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 3000);
 }
 
-// Push notifications are not implemented yet — there is no sender anywhere in
-// the app. Until there is, record the member's preference but don't ask the
-// browser for notification permission, since nothing would ever use it.
-function handleNotifToggle(key, enabled) {
-  updateNotifPref(key, enabled);
+// ── Web Push ──
+// Standard VAPID push: no Firebase Cloud Messaging and no paid plan. The
+// public key is safe to ship; the matching private key lives in a GitHub
+// secret and is only used by the scheduled sender workflow.
+const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'];
+
+const VAPID_PUBLIC_KEY = 'BGq8bv1aasEYZI8pQTLKT7LO0BQUiK5jiX3SI8xlDFqOpGRvkKq4b-m2mR2YcRTEjcv5C16n6Y1C-3hl6K0YeE4';
+
+function urlBase64ToUint8Array(base64) {
+  const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(padded);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+// iOS only delivers push to a PWA installed on the Home Screen.
+function isInstalled() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
+// Store the browser's push subscription against the member so the sender can
+// reach them. Called whenever a notification preference is switched on.
+async function ensurePushSubscription() {
+  if (!pushSupported() || !currentUser) return { ok: false, reason: 'unsupported' };
+  if (isIOS() && !isInstalled()) return { ok: false, reason: 'ios-needs-install' };
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return { ok: false, reason: 'denied' };
+
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+  }
+  const json = sub.toJSON();
+  await pushSubsRef.child(currentUser.uid).set({
+    uid:       currentUser.uid,
+    endpoint:  json.endpoint,
+    p256dh:    json.keys.p256dh,
+    auth:      json.keys.auth,
+    updatedAt: new Date().toISOString()
+  });
+  return { ok: true };
+}
+
+async function removePushSubscription() {
+  if (!currentUser) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+  } catch {}
+  await pushSubsRef.child(currentUser.uid).remove().catch(() => {});
+}
+
+// Any preference still on? If not, drop the subscription entirely.
+function anyNotifPrefOn() {
+  return NOTIF_KEYS.some(k => {
+    const el = document.getElementById('notif-' + k);
+    return el && el.checked;
+  });
+}
+
+// ── Install prompt ──
+// iOS delivers push only to an installed PWA, so nudging members to install is
+// what actually makes notifications reach them.
+const INSTALL_DISMISSED_KEY = 'miroku-install-dismissed';
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();           // Chrome/Android: keep it for our own button
+  deferredInstallPrompt = e;
+  showInstallBanner();
+});
+
+function installInstructions() {
+  if (isIOS()) return 'Tap the Share button below, then "Add to Home Screen".';
+  return 'Open your browser menu (⋮) and choose "Install app".';
+}
+
+function showInstallBanner(force = false) {
+  const el = document.getElementById('install-banner');
+  if (!el || isInstalled()) return;
+  if (!force && localStorage.getItem(INSTALL_DISMISSED_KEY) === '1') return;
+  document.getElementById('install-banner-steps').textContent = installInstructions();
+  document.getElementById('install-banner-action').classList.toggle('hidden', !deferredInstallPrompt);
+  el.classList.remove('hidden');
+}
+
+function initInstallBanner() {
+  const el = document.getElementById('install-banner');
+  if (!el) return;
+  document.getElementById('install-banner-close').addEventListener('click', () => {
+    el.classList.add('hidden');
+    localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+  });
+  document.getElementById('install-banner-action').addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (outcome === 'accepted') el.classList.add('hidden');
+  });
+  showInstallBanner();
+}
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner')?.classList.add('hidden');
+});
+
+async function handleNotifToggle(key, enabled) {
+  const el = document.getElementById('notif-' + key);
+  if (!enabled) {
+    updateNotifPref(key, false);
+    if (!anyNotifPrefOn()) await removePushSubscription();
+    return;
+  }
+
+  const res = await ensurePushSubscription();
+  if (res.ok) { updateNotifPref(key, true); return; }
+
+  if (el) el.checked = false;
+  if (res.reason === 'ios-needs-install') {
+    showToast('On iPhone, add the app to your Home Screen first to receive notifications.', 'error');
+    showInstallBanner(true);
+  } else if (res.reason === 'denied') {
+    showToast('Notifications are blocked. Turn them on for this app in your phone settings.', 'error');
+  } else {
+    showToast('This browser does not support notifications.', 'error');
+  }
 }
 
 function updateNotifPref(key, value) {

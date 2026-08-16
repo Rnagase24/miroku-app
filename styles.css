@@ -1614,3 +1614,37 @@ body.is-admin .card-actions { display: flex; }
   margin-bottom: 12px;
 }
 .settings-coming-soon strong { color: var(--purple); }
+
+/* ── Install prompt (browser tab only) ── */
+.install-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--purple);
+  color: #f5ead8;
+}
+.install-banner-text { flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; }
+.install-banner-text strong { display: block; font-size: 13px; font-weight: 700; }
+.install-banner-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.install-banner-btn {
+  background: rgba(255,255,255,.9);
+  color: var(--purple);
+  border: none;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.install-banner-close {
+  background: none;
+  border: none;
+  color: rgba(245,234,216,.8);
+  font-size: 15px;
+  padding: 4px 6px;
+  cursor: pointer;
+  line-height: 1;
+}

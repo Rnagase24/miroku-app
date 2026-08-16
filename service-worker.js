@@ -1,4 +1,4 @@
-const CACHE = 'miroku-la-v20';
+const CACHE = 'miroku-la-v21';
 
 // Install: activate immediately without waiting
 self.addEventListener('install', () => self.skipWaiting());
@@ -23,5 +23,37 @@ self.addEventListener('fetch', e => {
         return response;
       })
       .catch(() => caches.match(e.request))
+  );
+});
+
+// ── Web Push ──
+// Payloads are sent by the scheduled GitHub Action (.github/workflows/push-notifications.yml).
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
+
+  const title = data.title || 'Miroku App';
+  const options = {
+    body:  data.body || '',
+    icon:  data.icon || 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag:   data.tag || 'miroku',            // collapses duplicates
+    renotify: false,
+    data:  { url: data.url || './' }
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Focus an existing window if the app is already open, otherwise open one.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || './';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const client of list) {
+        if ('focus' in client) return client.focus();
+      }
+      return self.clients.openWindow(target);
+    })
   );
 });
