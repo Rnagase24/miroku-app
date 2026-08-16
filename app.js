@@ -158,7 +158,8 @@ function authErrorMessage(err) {
     case 'auth/invalid-email':         return 'That does not look like a valid email address.';
     case 'auth/user-not-found':
     case 'auth/wrong-password':
-    case 'auth/invalid-credential':    return 'Incorrect email or password.';
+    case 'auth/invalid-credential':
+      return 'Incorrect email or password. If the password was filled in for you, it may be an old saved one — clear the box and type your current password.';
     case 'auth/too-many-requests':     return 'Too many attempts. Please wait a few minutes and try again.';
     case 'auth/email-already-in-use':  return 'An account already exists for that email. Try signing in instead.';
     case 'auth/weak-password':         return 'Password must be at least 6 characters.';
@@ -429,7 +430,11 @@ async function storeCredential(username, password) {
 // Firebase Auth owns the session and restores it on load, so there is no
 // manual session check any more — this listener is the single entry point.
 let authReady = false;
+const resettingPassword = new URLSearchParams(window.location.search).get('mode') === 'resetPassword';
 auth.onAuthStateChanged(async user => {
+  // A member may already be signed in when they follow a reset link; the reset
+  // form must still win.
+  if (resettingPassword && pendingOobCode !== null) return;
   if (!user) {
     currentUser = null;
     showApp(false);
@@ -471,6 +476,94 @@ auth.onAuthStateChanged(async user => {
   showApp(true);
   logSignIn();
   authReady = true;
+});
+
+// ── Password reset handled in-app ──
+// Firebase's own reset page lives on a different domain, so a password changed
+// there is invisible to the browser's saved-password store: it keeps offering
+// the OLD password on our login screen and sign-in appears to fail. Handling
+// the reset here, on our own origin and in a real form, lets the browser see
+// the change and offer to update the saved entry.
+let pendingOobCode = null;
+
+function showLoginView(which) {
+  ['signin-view', 'recover-view', 'newpw-view', 'signup-view'].forEach(id => {
+    document.getElementById(id).classList.toggle('hidden', id !== which);
+  });
+}
+
+// Strip the reset parameters so a refresh doesn't retry a spent code.
+function clearAuthParamsFromUrl() {
+  if (!window.history || !window.history.replaceState) return;
+  const url = new URL(window.location.href);
+  ['mode', 'oobCode', 'apiKey', 'continueUrl', 'lang'].forEach(k => url.searchParams.delete(k));
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
+
+async function handlePasswordResetLink() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('mode') !== 'resetPassword' || !params.get('oobCode')) return false;
+
+  const code = params.get('oobCode');
+  showLoginView('newpw-view');
+  document.getElementById('login-screen').classList.remove('hidden');
+
+  try {
+    const email = await auth.verifyPasswordResetCode(code);
+    pendingOobCode = code;
+    document.getElementById('newpw-email').value = email;
+    document.getElementById('newpw-intro').innerHTML =
+      `Setting a new password for <strong>${esc(email)}</strong>.`;
+    document.getElementById('newpw-pass').focus();
+  } catch (err) {
+    pendingOobCode = null;
+    document.getElementById('newpw-intro').textContent =
+      'This reset link has expired or has already been used.';
+    document.getElementById('newpw-error').textContent =
+      'Please go back and request a new reset link.';
+    document.getElementById('newpw-pass').disabled = true;
+    document.getElementById('newpw-confirm').disabled = true;
+    document.getElementById('newpw-submit').disabled = true;
+  }
+  clearAuthParamsFromUrl();
+  return true;
+}
+
+document.getElementById('newpw-back-btn').addEventListener('click', () => {
+  pendingOobCode = null;
+  showLoginView('signin-view');
+});
+
+document.getElementById('newpw-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pw    = document.getElementById('newpw-pass').value;
+  const cf    = document.getElementById('newpw-confirm').value;
+  const email = document.getElementById('newpw-email').value;
+  const errEl = document.getElementById('newpw-error');
+  const btn   = document.getElementById('newpw-submit');
+  errEl.textContent = '';
+
+  if (!pendingOobCode) { errEl.textContent = 'This link is no longer valid — please request a new one.'; return; }
+  if (pw.length < 6)   { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+  if (pw !== cf)       { errEl.textContent = 'Passwords do not match.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await auth.confirmPasswordReset(pendingOobCode, pw);
+    pendingOobCode = null;
+    await auth.signInWithEmailAndPassword(email, pw);
+    await storeCredential(email, pw);
+    showLoginView('signin-view');
+    showToast('Password updated — you are signed in.', 'info');
+    // onAuthStateChanged opens the app.
+  } catch (err) {
+    errEl.textContent = err.code === 'auth/invalid-action-code'
+      ? 'This reset link has expired or has already been used. Please request a new one.'
+      : authErrorMessage(err);
+    btn.disabled = false;
+    btn.textContent = 'Save new password';
+  }
 });
 
 // ── Login ──
@@ -2977,4 +3070,6 @@ document.getElementById('modal-overlay').addEventListener('click', e => {
 
 // ── Init ──
 // Firebase Auth restores any existing session and fires onAuthStateChanged,
-// which is what boots the app. Nothing to call here.
+// which is what boots the app. The one thing to check first is whether this
+// page was opened from an emailed password-reset link.
+handlePasswordResetLink();

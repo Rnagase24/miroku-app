@@ -58,6 +58,23 @@
         <p class="login-switch"><button class="login-switch-btn" id="recover-back-btn" type="button">&#8592; Back to sign in</button></p>
       </div>
 
+      <!-- Set New Password (from an emailed reset link) -->
+      <div id="newpw-view" class="hidden">
+        <p class="login-tagline">Choose a new password</p>
+        <form id="newpw-form">
+          <p class="login-help" id="newpw-intro">Checking your link&hellip;</p>
+          <!-- Readonly, but present and marked as the username so the browser
+               updates the RIGHT saved password instead of creating a new entry. -->
+          <input class="login-input" id="newpw-email" type="email" autocomplete="username" readonly
+                 style="opacity:.7" />
+          <input class="login-input" id="newpw-pass" type="password" placeholder="New password (min 6 characters)" autocomplete="new-password" />
+          <input class="login-input" id="newpw-confirm" type="password" placeholder="Confirm new password" autocomplete="new-password" />
+          <p class="login-error" id="newpw-error"></p>
+          <button class="login-btn" id="newpw-submit" type="submit">Save new password</button>
+        </form>
+        <p class="login-switch"><button class="login-switch-btn" id="newpw-back-btn" type="button">&#8592; Back to sign in</button></p>
+      </div>
+
       <!-- Sign Up View -->
       <div id="signup-view" class="hidden">
         <p class="login-tagline">Create your account</p>
