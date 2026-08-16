@@ -1403,11 +1403,14 @@ async function migrateAllLegacyAccounts() {
   return { migrated, skipped, total: names.length };
 }
 
+// NOTE: Firebase cancels snapshot.forEach() as soon as the callback returns a
+// truthy value. push() and unshift() return the new length, so `s.forEach(x =>
+// arr.push(x))` silently reads only the first record. Always use a block body.
 function openSigninLogModal() {
   openModal('Sign-in Log', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
   signinLogRef.orderByChild('timestamp').limitToLast(60).once('value').then(snap => {
     const entries = [];
-    snap.forEach(child => entries.unshift(child.val()));
+    snap.forEach(child => { entries.unshift(child.val()); });
     if (!entries.length) {
       document.getElementById('modal-body').innerHTML = '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:20px 0;">No sign-in history yet.</p>';
       return;
@@ -1841,7 +1844,7 @@ function renderMyAppointments(type) {
   if (!box || !currentUser) return;
   appointmentsRef.child(currentUser.uid).once('value').then(snap => {
     const list = [];
-    snap.forEach(c => list.push({ id: c.key, ...c.val() }));
+    snap.forEach(c => { list.push({ id: c.key, ...c.val() }); });
     const mine = list.filter(a => apptType(a) === type)
                      .sort((a, b) => meetingDate(b) - meetingDate(a));
 
@@ -2050,7 +2053,7 @@ function openMeetingRequestsModal() {
   appointmentsRef.once('value').then(snap => {
     const all = [];
     snap.forEach(userNode => {
-      userNode.forEach(c => all.push({ uid: userNode.key, id: c.key, ...c.val() }));
+      userNode.forEach(c => { all.push({ uid: userNode.key, id: c.key, ...c.val() }); });
     });
     all.sort((a, b) => meetingDate(a) - meetingDate(b));
     console.log(`Requests inbox: ${all.length} appointment(s) across ${snap.numChildren()} member(s)`);
@@ -2664,7 +2667,7 @@ function openPrayerInboxModal() {
   prayerRequestsRef.once('value')
     .then(async snap => {
       const live = [];
-      snap.forEach(c => live.push(c.val()));
+      snap.forEach(c => { live.push(c.val()); });
 
       // Requests submitted before prayer requests moved out of church/data are
       // still readable by every member. Move them across and clear the old
