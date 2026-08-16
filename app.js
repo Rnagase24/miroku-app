@@ -753,6 +753,7 @@ function showApp(visible) {
     subscribeData();
     initSettings();
     initInstallBanner();
+    loadAppVersion();
     renderNotifStatus();
 
     const wire = {
@@ -3565,8 +3566,22 @@ async function saveProfile() {
 // secret and is only used by the scheduled sender workflow.
 const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'oneonone'];
 
-// Bumped with the service worker so the status panel reveals a stale install.
-const APP_VERSION = 'v22';
+// Filled in from the running service worker, so it always reflects the code
+// actually on the device rather than a constant that drifts out of date.
+let APP_VERSION = 'checking…';
+
+function loadAppVersion() {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'version') {
+      APP_VERSION = String(e.data.version).replace('miroku-la-', '');
+      renderNotifStatus();
+    }
+  });
+  navigator.serviceWorker.ready
+    .then(reg => { if (reg.active) reg.active.postMessage('version'); })
+    .catch(() => {});
+}
 
 const VAPID_PUBLIC_KEY = 'BGq8bv1aasEYZI8pQTLKT7LO0BQUiK5jiX3SI8xlDFqOpGRvkKq4b-m2mR2YcRTEjcv5C16n6Y1C-3hl6K0YeE4';
 

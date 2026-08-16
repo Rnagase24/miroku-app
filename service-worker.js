@@ -1,4 +1,4 @@
-const CACHE = 'miroku-la-v27';
+const CACHE = 'miroku-la-v28';
 
 // Install: activate immediately without waiting
 self.addEventListener('install', () => self.skipWaiting());
@@ -56,4 +56,12 @@ self.addEventListener('notificationclick', event => {
       return self.clients.openWindow(target);
     })
   );
+});
+
+// Report the running cache version so the app can show it. Hardcoding the
+// version in app.js meant the label drifted and reported a stale value.
+self.addEventListener('message', event => {
+  if (event.data === 'version' && event.source) {
+    event.source.postMessage({ type: 'version', version: CACHE });
+  }
 });
