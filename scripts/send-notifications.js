@@ -170,5 +170,9 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       .map(k => db.ref('church/pushLog').child(k).remove()));
   }
 
-  process.exit(0);
-})().catch(err => { console.error(err); process.exit(1); });
+})()
+  // firebase-admin keeps a live connection to the database, so the process will
+  // not exit on its own. Every path — including the early "nothing to do"
+  // returns — has to end here, or the job hangs until it times out.
+  .then(() => { console.log('Done.'); process.exit(0); })
+  .catch(err => { console.error(err); process.exit(1); });
