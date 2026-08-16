@@ -253,9 +253,9 @@ const DEFAULT_DATA = {
       recurrence: { weekday: 3, nths: [] } }
   ],
   location: {
-    address: '123 Faith Avenue',
+    address: '123 Main Street',
     city: 'Los Angeles, CA 90001',
-    mapsUrl: 'https://maps.google.com/?q=123+Faith+Avenue+Los+Angeles+CA'
+    mapsUrl: 'https://maps.google.com/?q=123+Main+Street+Los+Angeles+CA'
   },
   contact: { phone: '(323) 555-0100', email: 'info@mirokuLA.org' },
   liveEvents: {
@@ -268,37 +268,37 @@ const DEFAULT_DATA = {
     { id: 2, date: 'Sat, May 17', title: 'Community Food Drive',        desc: 'Help pack food boxes for families in need. Volunteers welcome!',       tag: 'Community'        },
     { id: 3, date: 'Fri, May 23', title: 'Youth Game Night',            desc: 'Fun and fellowship for teens. Bring a friend! Snacks provided.',       tag: 'Youth'            },
     { id: 4, date: 'Sun, Jun 1',  title: 'Summer Kickoff Cookout',      desc: 'Join us after the 10:30 AM service for a cookout on the lawn.',        tag: 'Fellowship'       },
-    { id: 5, date: 'Sat, Jun 7',  title: "Men's Breakfast",             desc: "Monthly men's breakfast and Bible study. 8:00 AM in Fellowship Hall.", tag: "Men's Ministry"   },
-    { id: 6, date: 'Sat, Jun 14', title: "Women's Bible Study Retreat", desc: 'A one-day retreat for women — worship, prayer, and fellowship.',       tag: "Women's Ministry" }
+    { id: 5, date: 'Sat, Jun 7',  title: "Men's Breakfast",  desc: "Monthly men's breakfast and study of the teachings. 8:00 AM in the Fellowship Hall.", tag: "Men's Group"   },
+    { id: 6, date: 'Sat, Jun 14', title: "Women's Retreat",  desc: 'A one-day retreat for women — study, prayer, and fellowship.',                        tag: "Women's Group" }
   ],
   members: [
-    { id: 1, name: 'Pastor David Williams', role: 'Senior Pastor',        phone: '(323) 555-0101', email: 'david@mirokuLA.org'    },
-    { id: 2, name: 'Sarah Johnson',         role: 'Worship Director',     phone: '(323) 555-0102', email: 'sarah@mirokuLA.org'    },
-    { id: 3, name: 'Michael Thompson',      role: 'Youth Pastor',         phone: '(323) 555-0103', email: 'michael@mirokuLA.org'  },
-    { id: 4, name: 'Lisa Martinez',         role: "Children's Ministry",  phone: '(323) 555-0104', email: 'lisa@mirokuLA.org'     },
+    { id: 1, name: 'David Williams',        role: 'Head Minister',        phone: '(323) 555-0101', email: 'david@mirokuLA.org'    },
+    { id: 2, name: 'Sarah Johnson',         role: 'Services Director',    phone: '(323) 555-0102', email: 'sarah@mirokuLA.org'    },
+    { id: 3, name: 'Michael Thompson',      role: 'Youth Minister',       phone: '(323) 555-0103', email: 'michael@mirokuLA.org'  },
+    { id: 4, name: 'Lisa Martinez',         role: "Children's Group",     phone: '(323) 555-0104', email: 'lisa@mirokuLA.org'     },
     { id: 5, name: 'Robert Chen',           role: 'Deacon',               phone: '(323) 555-0105', email: 'robert@mirokuLA.org'   },
     { id: 6, name: 'Amanda Davis',          role: 'Church Administrator', phone: '(323) 555-0100', email: 'info@mirokuLA.org'     },
     { id: 7, name: 'James Wilson',          role: 'Elder',                phone: '(323) 555-0106', email: 'james@mirokuLA.org'    },
-    { id: 8, name: 'Patricia Moore',        role: 'Prayer Team Lead',     phone: '(323) 555-0107', email: 'patricia@mirokuLA.org' }
+    { id: 8, name: 'Patricia Moore',        role: 'Prayer Lead',          phone: '(323) 555-0107', email: 'patricia@mirokuLA.org' }
   ],
   media: [
-    { id: 1, source: 'other', series: 'Faith That Moves Mountains', title: 'When God Says Wait',             date: 'May 4, 2025',  pastor: 'Pastor David Williams', url: '#' },
-    { id: 2, source: 'other', series: 'Faith That Moves Mountains', title: 'The Power of Persistent Prayer', date: 'Apr 27, 2025', pastor: 'Pastor David Williams', url: '#' },
-    { id: 3, source: 'other', series: 'Rooted',                     title: 'Finding Peace in the Storm',     date: 'Apr 20, 2025', pastor: 'Michael Thompson',      url: '#' },
-    { id: 4, source: 'other', series: 'Rooted',                     title: 'Grace Greater Than Our Sin',     date: 'Apr 13, 2025', pastor: 'Pastor David Williams', url: '#' }
+    { id: 1, source: 'other', series: 'Study of the Teachings', title: 'The Light Within',        date: 'May 4, 2025',  pastor: 'David Williams',   url: '#' },
+    { id: 2, source: 'other', series: 'Study of the Teachings', title: 'Gratitude in Daily Life', date: 'Apr 27, 2025', pastor: 'David Williams',   url: '#' },
+    { id: 3, source: 'other', series: 'Foundations',            title: 'Finding Peace in the Storm', date: 'Apr 20, 2025', pastor: 'Michael Thompson', url: '#' },
+    { id: 4, source: 'other', series: 'Foundations',            title: 'Living with Purpose',     date: 'Apr 13, 2025', pastor: 'David Williams',   url: '#' }
   ],
   messages: [],
   youtube:      { channelId: '', apiKey: '' },
   soreiSaishi:  [],
   soreiRules:   '',
   donations: {
-    message:    'Thank you for your generous giving! Every contribution supports our ministry.',
+    message:    'Thank you for your generous giving! Every contribution supports our church and its activities.',
     websiteUrl: 'https://www.worldmessianic.org/donate',
     zelle:      { enabled: false, info: '', note: '' },
     venmo:      { enabled: false, handle: '', note: '' }
   },
   prayerForms: [
-    { id: 1, type: 'daily',     title: 'Daily Prayer',                       description: 'Share your heart. Our prayer team prays over every request submitted here.',                              active: true, fixed: true },
+    { id: 1, type: 'daily',     title: 'Daily Prayer',                       description: 'Share what is on your heart. Our ministers hold every request submitted here.',                              active: true, fixed: true },
     { id: 2, type: 'ancestors', title: 'Prayer Request for My Ancestors',     description: 'Request prayers for your ancestors and loved ones who have passed. Our ministers will hold them in prayer.', active: true, fixed: true }
   ],
   prayerRequests: [],
@@ -1018,8 +1018,8 @@ function openScheduleModal() {
       <textarea class="form-textarea" id="new-msg-text" placeholder="Today's inspiring message..." style="min-height:90px"></textarea>
     </div>
     <div class="form-group">
-      <label class="form-label">Scripture Reference</label>
-      <input class="form-input" id="new-msg-scripture" placeholder="e.g. John 3:16" />
+      <label class="form-label">Source / Reference</label>
+      <input class="form-input" id="new-msg-scripture" placeholder="e.g. Daily Inspiration page 17" />
     </div>
     <button class="form-btn form-btn-primary" id="save-new-msg-btn">+ Schedule Message</button>
 
@@ -1089,8 +1089,8 @@ function openEditMessageModal(id) {
       <textarea class="form-textarea" id="edit-msg-text" style="min-height:90px">${esc(m.text)}</textarea>
     </div>
     <div class="form-group">
-      <label class="form-label">Scripture Reference</label>
-      <input class="form-input" id="edit-msg-scripture" value="${esc(m.scripture || '')}" placeholder="e.g. John 3:16" />
+      <label class="form-label">Source / Reference</label>
+      <input class="form-input" id="edit-msg-scripture" value="${esc(m.scripture || '')}" placeholder="e.g. Daily Inspiration page 17" />
     </div>
     <button class="form-btn form-btn-primary" id="update-msg-btn">Save Changes</button>
     <button class="form-btn form-btn-danger" id="back-schedule-btn" style="background:#f5f0ff;color:var(--purple);border:1px solid #d8c8f0">&#8592; Back to Schedule</button>
@@ -1799,7 +1799,7 @@ function openMemberModal(id) {
     <div class="form-group"><label class="form-label">Full Name</label>
       <input class="form-input" id="f-name" value="${esc(m ? m.name : '')}" placeholder="Full name" /></div>
     <div class="form-group"><label class="form-label">Role / Title</label>
-      <input class="form-input" id="f-role" value="${esc(m ? m.role : '')}" placeholder="e.g. Worship Director" /></div>
+      <input class="form-input" id="f-role" value="${esc(m ? m.role : '')}" placeholder="e.g. Services Director" /></div>
     <div class="form-group"><label class="form-label">Phone</label>
       <input class="form-input" id="f-phone" type="tel" value="${esc(m ? m.phone : '')}" placeholder="(555) 555-5555" /></div>
     <div class="form-group"><label class="form-label">Email</label>
@@ -1900,7 +1900,7 @@ function openMediaModal(id) {
     <div class="form-group"><label class="form-label">Series / Service Name</label>
       <input class="form-input" id="f-series" value="${esc(m ? m.series || '' : '')}" placeholder="e.g. Sunday Service" /></div>
     <div class="form-group"><label class="form-label">Title</label>
-      <input class="form-input" id="f-title" value="${esc(m ? m.title : '')}" placeholder="Sermon title" /></div>
+      <input class="form-input" id="f-title" value="${esc(m ? m.title : '')}" placeholder="Teaching title" /></div>
     <div class="form-group"><label class="form-label">Date</label>
       <input class="form-input" id="f-date" type="date" value="${esc(m ? toInputDate(m.date) : '')}" /></div>
     <div class="form-group"><label class="form-label">Speaker</label>
@@ -2104,7 +2104,7 @@ function openPrayerSubmitModal(formId) {
         submittedAt:    new Date().toISOString()
       }).then(() => {
         closeModal();
-        showToast('Your prayer request has been submitted. God bless you!', 'info');
+        showToast('Your prayer request has been submitted. Thank you.', 'info');
       }).catch(err => {
         console.error('Prayer request error:', err);
         btn.disabled = false;
@@ -2911,7 +2911,7 @@ function initSettings() {
   setVal('settings-phone',      user.phone);
 
   // Load notification prefs from settingsRef
-  const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'classes'];
+  const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'];
   settingsRef.once('value').then(snap => {
     const data = snap.exists() ? snap.val() : {};
     const prefs = ((data[currentUser.username]) || {}).notifPrefs || {};
@@ -2935,7 +2935,7 @@ function initSettings() {
   }
 
   // Notification toggles
-  ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'classes'].forEach(key => {
+  ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'].forEach(key => {
     const el = document.getElementById('notif-' + key);
     if (!el) return;
     el.replaceWith(el.cloneNode(true));
