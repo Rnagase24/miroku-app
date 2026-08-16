@@ -134,7 +134,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   }
 
   const due = jobs.filter(j => !sentLog[j.key]);
-  if (!due.length) { console.log(`${jobs.length} candidate(s), all already sent.`); return; }
+  if (!due.length) {
+    // Distinguish "nothing is scheduled for now" from "it went out already" —
+    // reading the first as the second sends you hunting for a bug that is not there.
+    console.log(jobs.length
+      ? `Nothing new to send — ${jobs.length} due item(s) already went out earlier.`
+      : 'Nothing due right now (no message scheduled for today, and no service today).');
+    return;
+  }
 
   // ── deliver ──
   const stale = [];
