@@ -118,7 +118,6 @@
     </div>
     <div class="header-actions">
       <span class="admin-badge hidden" id="admin-badge">ADMIN</span>
-      <button class="logout-btn" id="logout-btn">Sign Out</button>
     </div>
   </header>
 
@@ -262,6 +261,56 @@
     </section>
 
     <!-- SETTINGS TAB -->
+    <!-- ONE-ON-ONE TAB -->
+    <section class="tab-content" id="tab-oneonone">
+      <div class="more-back-bar hidden" id="back-bar-oneonone">
+        <button class="more-back-btn" data-back="more">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
+        </button>
+      </div>
+
+      <div class="section-header" style="margin-top:4px">
+        <h3 class="section-title">One-on-One with Your Minister</h3>
+        <button class="section-edit-btn admin-only" id="oneonone-inbox-btn">Requests</button>
+      </div>
+
+      <div class="oneonone-intro">
+        <p class="oneonone-lead">
+          Meeting with your minister each week is a spiritual practice.
+        </p>
+        <p>
+          In the teachings of Meishu-sama, the light we receive grows brighter through
+          sincere connection. A regular, personal conversation is one of the simplest
+          ways to deepen gratitude, find clarity in daily life, and renew your spirit.
+        </p>
+        <p>
+          Come as you are &mdash; with a question, a burden, or simply the wish to be present.
+        </p>
+      </div>
+
+      <h3 class="section-title">How it works</h3>
+      <div class="card-list">
+        <div class="card"><div class="card-icon">&#128197;</div><div class="card-body">
+          <h4>Request 48 hours ahead</h4><p>Meetings must be requested at least two days in advance.</p></div></div>
+        <div class="card"><div class="card-icon">&#10003;</div><div class="card-body">
+          <h4>Your minister confirms</h4><p>The date, time and length are approved before the meeting is set.</p></div></div>
+        <div class="card"><div class="card-icon">&#128172;</div><div class="card-body">
+          <h4>Online or in person</h4><p>Online meetings are held on Zoom. The link appears here once approved.</p></div></div>
+        <div class="card"><div class="card-icon">&#128336;</div><div class="card-body">
+          <h4>30 minutes or 1 hour</h4><p>Choose the length that suits you; your minister will confirm it.</p></div></div>
+        <div class="card"><div class="card-icon">&#128276;</div><div class="card-body">
+          <h4>You'll be reminded</h4><p>A reminder 24 hours before, and again 1 hour before.</p></div></div>
+        <div class="card"><div class="card-icon">&#9888;&#65039;</div><div class="card-body">
+          <h4>Cancel up to 8 hours before</h4><p>After that, please contact your minister directly.</p></div></div>
+      </div>
+
+      <button class="form-btn form-btn-primary" id="request-meeting-btn" style="margin-top:18px">Request a Meeting</button>
+
+      <h3 class="section-title">My Meetings</h3>
+      <div id="my-meetings-list" class="card-list"></div>
+    </section>
+
     <section class="tab-content" id="tab-settings">
       <div class="more-back-bar hidden" id="back-bar-settings">
         <button class="more-back-btn" data-back="more">
@@ -384,6 +433,16 @@
         </div>
         <div class="settings-toggle-row">
           <div class="toggle-info">
+            <div class="toggle-title">One-on-One Meetings</div>
+            <div class="toggle-sub">Reminders for your minister meetings</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-oneonone" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
             <div class="toggle-title">Service Times</div>
             <div class="toggle-sub">Reminders for Sunday services</div>
           </div>
@@ -393,6 +452,11 @@
           </label>
         </div>
         
+      </div>
+
+      <h3 class="section-title">Account</h3>
+      <div class="settings-card">
+        <button class="form-btn" id="logout-btn" style="margin:0;background:#fdecea;color:#c0392b;border:1px solid #e8b4ae">Sign Out</button>
       </div>
 
     </section>
@@ -411,6 +475,11 @@
         <button class="more-menu-row" data-more="directory">
           <div class="more-menu-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
           <span class="more-menu-label">Member Directory</span>
+          <svg class="more-menu-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="more-menu-row" data-more="oneonone">
+          <div class="more-menu-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+          <span class="more-menu-label">One-on-One with Your Minister</span>
           <svg class="more-menu-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
         <button class="more-menu-row" data-more="sorei">

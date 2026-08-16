@@ -20,6 +20,9 @@ const signinLogRef = db.ref('church/signinLog');
 const prayerRequestsRef = db.ref('church/prayerRequests');
 const soreiRequestsRef  = db.ref('church/soreiRequests');
 const pushSubsRef       = db.ref('church/pushSubs');
+// Appointments are nested per member so a member can read their own without
+// being able to read anyone else's.
+const appointmentsRef   = db.ref('church/appointments');
 
 // ── Auth (Firebase Authentication) ──
 // Credentials live in Firebase Auth (Google hashes the passwords); profile and
@@ -303,7 +306,12 @@ const DEFAULT_DATA = {
     { id: 2, type: 'ancestors', title: 'Prayer Request for My Ancestors',     description: 'Request prayers for your ancestors and loved ones who have passed. Our ministers will hold them in prayer.', active: true, fixed: true }
   ],
   prayerRequests: [],
-  soreiRequests:  []
+  soreiRequests:  [],
+  oneOnOne: {
+    zoomUrl:   'https://us02web.zoom.us/launch/jc/86125800160',
+    meetingId: '861 2580 0160',
+    passcode:  '662284'
+  }
 };
 
 // ── Realtime Database layer ──
@@ -739,6 +747,16 @@ function showApp(visible) {
     initSettings();
     initInstallBanner();
     renderNotifStatus();
+
+    ['request-meeting-btn', 'oneonone-inbox-btn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      const fresh = b.cloneNode(true);      // drop listeners from a previous sign-in
+      b.replaceWith(fresh);
+      fresh.addEventListener('click',
+        id === 'request-meeting-btn' ? openRequestMeetingModal : openMeetingRequestsModal);
+    });
+    renderMyMeetings();
     const schedBtn = document.getElementById('schedule-word-btn');
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
@@ -852,6 +870,7 @@ function navigateToTab(tab) {
 }
 
 function navigateToMoreSection(section) {
+  if (section === 'oneonone') renderMyMeetings();
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + section).classList.add('active');
   // Show back bar for this section
@@ -1632,6 +1651,292 @@ function bindServicesForm() {
       else     delete appData.services[i].recurrence;
     });
     saveData(); closeModal();
+  });
+}
+
+// ── One-on-One with your Minister ──
+// Requests need 48 hours' notice, minister approval, and can be cancelled up
+// to 8 hours before. All three rules are enforced here and restated in a
+// checklist the member must tick before confirming.
+const BOOKING_NOTICE_HOURS = 48;
+const CANCEL_CUTOFF_HOURS  = 8;
+
+const PURPOSE_LABELS = {
+  guidance: 'Guidance',
+  johrei:   'Johrei',
+  prayer:   'Prayer',
+  all:      'Guidance, Johrei and Prayer'
+};
+const STATUS_LABELS = {
+  pending:   { text: 'Awaiting approval', color: '#b06a00' },
+  approved:  { text: 'Confirmed',         color: '#15803d' },
+  declined:  { text: 'Not approved',      color: '#c0392b' },
+  cancelled: { text: 'Cancelled',         color: 'rgba(32,30,29,.5)' }
+};
+
+// A meeting's date+time are stored as local wall-clock strings; combine them
+// into a real instant so we can compare against now.
+function meetingDate(appt) {
+  return new Date(`${appt.date}T${(appt.time || '00:00')}:00`);
+}
+const hoursUntil = appt => (meetingDate(appt) - Date.now()) / 3600000;
+const canCancel  = appt => appt.status !== 'cancelled' && appt.status !== 'declined'
+                        && hoursUntil(appt) > CANCEL_CUTOFF_HOURS;
+
+function formatMeetingWhen(appt) {
+  const d = meetingDate(appt);
+  if (isNaN(d)) return `${appt.date} ${appt.time}`;
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+       + ' at ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// Earliest datetime a member may book, as a value for <input type="datetime-local">
+function earliestBookingValue() {
+  const d = new Date(Date.now() + BOOKING_NOTICE_HOURS * 3600000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function oneOnOneConfig() {
+  return Object.assign({}, DEFAULT_DATA.oneOnOne, appData.oneOnOne || {});
+}
+
+function renderMyMeetings() {
+  const box = document.getElementById('my-meetings-list');
+  if (!box || !currentUser) return;
+  appointmentsRef.child(currentUser.uid).once('value').then(snap => {
+    const list = [];
+    snap.forEach(c => list.push({ id: c.key, ...c.val() }));
+    list.sort((a, b) => meetingDate(b) - meetingDate(a));
+
+    if (!list.length) {
+      box.innerHTML = '<p style="color:var(--text-muted);font-size:14px">You have no meetings yet.</p>';
+      return;
+    }
+    const cfg = oneOnOneConfig();
+    box.innerHTML = list.map(a => {
+      const st = STATUS_LABELS[a.status] || STATUS_LABELS.pending;
+      const showJoin = a.status === 'approved' && a.mode === 'online';
+      return `
+      <div class="card" style="flex-direction:column;align-items:stretch;gap:8px">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+          <div>
+            <h4 style="font-size:15px;font-weight:600">${esc(formatMeetingWhen(a))}</h4>
+            <p style="font-size:13px;color:var(--text-muted)">
+              ${esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull; ${a.duration} min &bull;
+              ${a.mode === 'online' ? 'Online' : 'In person'}
+            </p>
+          </div>
+          <span style="font-size:11px;font-weight:700;color:${st.color};white-space:nowrap">${esc(st.text)}</span>
+        </div>
+        ${a.notes ? `<p style="font-size:13px;color:var(--text-muted)">&ldquo;${esc(a.notes)}&rdquo;</p>` : ''}
+        ${showJoin ? `
+          <a class="donation-give-btn" href="${esc(cfg.zoomUrl)}" target="_blank" rel="noopener"
+             style="display:block;text-align:center;text-decoration:none;font-size:15px;padding:12px">Join on Zoom</a>
+          <p style="font-size:11px;color:var(--text-muted);text-align:center">
+            Meeting ID ${esc(cfg.meetingId)} &bull; Passcode ${esc(cfg.passcode)}</p>` : ''}
+        ${canCancel(a)
+          ? `<button class="form-btn" data-cancel-appt="${esc(a.id)}" style="margin:0;background:#fdecea;color:#c0392b;border:1px solid #e8b4ae">Cancel this meeting</button>`
+          : (a.status === 'approved' || a.status === 'pending')
+            ? `<p style="font-size:11px;color:var(--text-muted)">Too late to cancel here &mdash; please contact your minister directly.</p>`
+            : ''}
+      </div>`;
+    }).join('');
+
+    box.querySelectorAll('[data-cancel-appt]').forEach(btn => {
+      btn.addEventListener('click', () => cancelMeeting(btn.dataset.cancelAppt));
+    });
+  }).catch(err => {
+    console.error('Meetings load error:', err);
+    box.innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load your meetings.</p>';
+  });
+}
+
+async function cancelMeeting(id) {
+  const snap = await appointmentsRef.child(currentUser.uid).child(id).once('value');
+  const appt = snap.val();
+  if (!appt) return;
+  if (!canCancel(appt)) {
+    showToast(`Meetings can only be cancelled more than ${CANCEL_CUTOFF_HOURS} hours ahead.`, 'error');
+    return;
+  }
+  if (!confirm('Cancel this meeting with your minister?')) return;
+  await appointmentsRef.child(currentUser.uid).child(id)
+    .update({ status: 'cancelled', cancelledAt: new Date().toISOString() });
+  showToast('Meeting cancelled. Your minister has been notified.', 'info');
+  renderMyMeetings();
+}
+
+function openRequestMeetingModal() {
+  const p = myProfile() || {};
+  const name = p.displayName || currentUser.displayName || '';
+  openModal('Request a Meeting', `
+    <div class="form-group"><label class="form-label">Your Name</label>
+      <input class="form-input" id="oo-name" value="${esc(name)}" placeholder="Your full name" /></div>
+
+    <div class="form-group"><label class="form-label">How would you like to meet?</label>
+      <select class="form-input" id="oo-mode">
+        <option value="online">Online (Zoom)</option>
+        <option value="inperson">In person</option>
+      </select></div>
+
+    <div class="form-group"><label class="form-label">Purpose of the meeting</label>
+      <select class="form-input" id="oo-purpose">
+        <option value="guidance">Guidance</option>
+        <option value="johrei">Johrei</option>
+        <option value="prayer">Prayer</option>
+        <option value="all">All of the above</option>
+      </select></div>
+
+    <div class="form-group"><label class="form-label">How long?</label>
+      <select class="form-input" id="oo-duration">
+        <option value="30">30 minutes</option>
+        <option value="60">1 hour</option>
+      </select></div>
+
+    <div class="form-group"><label class="form-label">Preferred date and time</label>
+      <input class="form-input" id="oo-when" type="datetime-local" min="${earliestBookingValue()}" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">
+        At least ${BOOKING_NOTICE_HOURS} hours from now. Your minister will confirm.</p></div>
+
+    <div class="form-group"><label class="form-label">Anything you'd like to share beforehand? (optional)</label>
+      <textarea class="form-textarea" id="oo-notes" style="min-height:80px" placeholder="Optional"></textarea></div>
+
+    <div class="booking-checklist">
+      <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack1" />
+        <span>I understand this request must be at least ${BOOKING_NOTICE_HOURS} hours in advance.</span></label>
+      <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack2" />
+        <span>I understand my minister must approve the date, time and length before it is confirmed.</span></label>
+      <label class="booking-check"><input type="checkbox" class="oo-ack" id="oo-ack3" />
+        <span>I understand I can cancel in the app up to ${CANCEL_CUTOFF_HOURS} hours before, and after that I should contact my minister directly.</span></label>
+    </div>
+
+    <p class="settings-msg error" id="oo-msg" style="margin-bottom:8px"></p>
+    <button class="form-btn form-btn-primary" id="oo-submit" disabled>Confirm Request</button>
+  `, () => {
+    const submit = document.getElementById('oo-submit');
+    const acks   = [...document.querySelectorAll('.oo-ack')];
+    // The confirm button stays disabled until every point is acknowledged.
+    const sync = () => { submit.disabled = !acks.every(a => a.checked); };
+    acks.forEach(a => a.addEventListener('change', sync));
+
+    submit.addEventListener('click', async () => {
+      const msg = document.getElementById('oo-msg');
+      const name = document.getElementById('oo-name').value.trim();
+      const when = document.getElementById('oo-when').value;
+      msg.textContent = '';
+
+      if (!name) { msg.textContent = 'Please enter your name.'; return; }
+      if (!when) { msg.textContent = 'Please choose a date and time.'; return; }
+      const chosen = new Date(when);
+      if (isNaN(chosen)) { msg.textContent = 'That date and time is not valid.'; return; }
+      if ((chosen - Date.now()) / 3600000 < BOOKING_NOTICE_HOURS) {
+        msg.textContent = `Please choose a time at least ${BOOKING_NOTICE_HOURS} hours from now.`;
+        return;
+      }
+
+      submit.disabled = true;
+      submit.textContent = 'Sending…';
+      const pad = n => String(n).padStart(2, '0');
+      try {
+        await appointmentsRef.child(currentUser.uid).push({
+          uid:         currentUser.uid,
+          memberName:  name,
+          memberEmail: currentUser.email || '',
+          memberPhone: (myProfile() || {}).phone || '',
+          mode:        document.getElementById('oo-mode').value,
+          purpose:     document.getElementById('oo-purpose').value,
+          duration:    parseInt(document.getElementById('oo-duration').value, 10),
+          date:        `${chosen.getFullYear()}-${pad(chosen.getMonth()+1)}-${pad(chosen.getDate())}`,
+          time:        `${pad(chosen.getHours())}:${pad(chosen.getMinutes())}`,
+          notes:       document.getElementById('oo-notes').value.trim(),
+          status:      'pending',
+          createdAt:   new Date().toISOString()
+        });
+        closeModal();
+        showToast('Request sent. Your minister will confirm it shortly.', 'info');
+        renderMyMeetings();
+      } catch (err) {
+        console.error('Meeting request error:', err);
+        msg.textContent = 'Could not send your request — please check your connection.';
+        submit.disabled = false;
+        submit.textContent = 'Confirm Request';
+      }
+    });
+  });
+}
+
+// ── Minister's view of every request ──
+function openMeetingRequestsModal() {
+  openModal('Meeting Requests', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  appointmentsRef.once('value').then(snap => {
+    const all = [];
+    snap.forEach(userNode => {
+      userNode.forEach(c => all.push({ uid: userNode.key, id: c.key, ...c.val() }));
+    });
+    all.sort((a, b) => meetingDate(a) - meetingDate(b));
+    const pending = all.filter(a => a.status === 'pending');
+    const rest    = all.filter(a => a.status !== 'pending');
+
+    const row = a => {
+      const st = STATUS_LABELS[a.status] || STATUS_LABELS.pending;
+      return `
+      <div class="prayer-inbox-item">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <span class="prayer-inbox-name">${esc(a.memberName || a.uid)}</span>
+          <span style="font-size:11px;font-weight:700;color:${st.color}">${esc(st.text)}</span>
+        </div>
+        <div class="prayer-inbox-date">${esc(formatMeetingWhen(a))}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin:4px 0">
+          ${esc(PURPOSE_LABELS[a.purpose] || a.purpose)} &bull; ${a.duration} min &bull;
+          ${a.mode === 'online' ? 'Online' : 'In person'}
+          ${a.memberPhone ? ' &bull; ' + esc(a.memberPhone) : ''}
+        </div>
+        ${a.notes ? `<div class="prayer-inbox-text">${esc(a.notes)}</div>` : ''}
+        ${a.status === 'pending' ? `
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="form-btn form-btn-primary" style="margin:0;flex:1;padding:9px"
+                    data-appt-ok="${esc(a.uid)}|${esc(a.id)}">Approve</button>
+            <button class="form-btn" style="margin:0;flex:1;padding:9px;background:#fdecea;color:#c0392b;border:1px solid #e8b4ae"
+                    data-appt-no="${esc(a.uid)}|${esc(a.id)}">Decline</button>
+          </div>` : ''}
+      </div>`;
+    };
+
+    document.getElementById('modal-body').innerHTML = `
+      <p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">
+        Awaiting approval (${pending.length})</p>
+      ${pending.length ? pending.map(row).join('')
+        : '<p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">Nothing waiting.</p>'}
+      <p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin:18px 0 8px">
+        Everything else (${rest.length})</p>
+      ${rest.length ? rest.map(row).join('')
+        : '<p style="color:var(--text-muted);font-size:13px">Nothing yet.</p>'}`;
+
+    const decide = (attr, status, note) => {
+      document.querySelectorAll(`[${attr}]`).forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const [uid, id] = btn.getAttribute(attr).split('|');
+          btn.disabled = true;
+          try {
+            await appointmentsRef.child(uid).child(id).update({
+              status, decidedAt: new Date().toISOString(), decidedBy: currentUser.username
+            });
+            showToast(note, 'info');
+            openMeetingRequestsModal();
+          } catch {
+            showToast('Could not save — admin permission required.', 'error');
+            btn.disabled = false;
+          }
+        });
+      });
+    };
+    decide('data-appt-ok', 'approved', 'Meeting approved. The member will be reminded before it starts.');
+    decide('data-appt-no', 'declined', 'Request declined.');
+  }).catch(err => {
+    console.error('Requests load error:', err);
+    document.getElementById('modal-body').innerHTML =
+      '<p style="color:#c0392b;font-size:14px">Could not load requests. Admin access required.</p>';
   });
 }
 
@@ -3033,7 +3338,7 @@ async function saveProfile() {
 // Standard VAPID push: no Firebase Cloud Messaging and no paid plan. The
 // public key is safe to ship; the matching private key lives in a GitHub
 // secret and is only used by the scheduled sender workflow.
-const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services'];
+const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'oneonone'];
 
 // Bumped with the service worker so the status panel reveals a stale install.
 const APP_VERSION = 'v22';

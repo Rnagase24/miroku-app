@@ -8,6 +8,8 @@
  * Two kinds of notification:
  *   dailyword — a scheduled Daily Inspiration whose time has arrived
  *   services  — a reminder on the morning of a service
+ *   oneonone  — 24 hours and 1 hour before an approved minister meeting,
+ *               sent to the member and to every minister (admin)
  *
  * Everything already delivered is recorded under church/pushLog so a message
  * is never sent twice, however often this runs.
@@ -66,6 +68,19 @@ const parts = (d = new Date()) => {
   };
 };
 
+// The UTC offset the church is on for a given date, as "-07:00"/"-08:00", so a
+// stored wall-clock time is interpreted in the church's zone rather than the
+// runner's UTC.
+function tzOffset(isoDate) {
+  const probe = new Date(`${isoDate}T12:00:00Z`);
+  const asUTC = new Date(probe.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const asTZ  = new Date(probe.toLocaleString('en-US', { timeZone: CHURCH_TZ }));
+  const mins  = Math.round((asTZ - asUTC) / 60000);
+  const sign  = mins < 0 ? '-' : '+';
+  const abs   = Math.abs(mins);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
+}
+
 // Which occurrence of its weekday a date is: the 1st Sunday, the 2nd, etc.
 const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
@@ -74,17 +89,19 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const now = parts();
   console.log(`Run at ${now.date} ${now.time} (${CHURCH_TZ})`);
 
-  const [subsSnap, dataSnap, settingsSnap, logSnap] = await Promise.all([
+  const [subsSnap, dataSnap, settingsSnap, logSnap, apptSnap] = await Promise.all([
     db.ref('church/pushSubs').once('value'),
     db.ref('church/data').once('value'),
     db.ref('church/settings').once('value'),
-    db.ref('church/pushLog').once('value')
+    db.ref('church/pushLog').once('value'),
+    db.ref('church/appointments').once('value')
   ]);
 
   const subs     = subsSnap.val()     || {};
   const data     = dataSnap.val()     || {};
   const settings = settingsSnap.val() || {};
   const sentLog  = logSnap.val()      || {};
+  const apptsByUser = apptSnap.val()  || {};
 
   if (!Object.keys(subs).length) { console.log('No push subscriptions yet — nothing to do.'); return; }
 
@@ -133,6 +150,56 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     }
   }
 
+  // 3. One-on-one meetings — 24h and 1h before an approved meeting. These go to
+  //    named recipients (the member plus every minister), not the whole list.
+  const adminUids = Object.entries(users)
+    .filter(([, p]) => p && p.role === 'admin')
+    .map(([uid]) => uid);
+
+  for (const [uid, appts] of Object.entries(apptsByUser)) {
+    for (const [apptId, a] of Object.entries(appts || {})) {
+      if (!a || a.status !== 'approved' || !a.date || !a.time) continue;
+
+      // The stored date/time is the church's local wall clock.
+      const meetingMs = new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`).getTime();
+      if (isNaN(meetingMs)) continue;
+      const minsAway = (meetingMs - Date.now()) / 60000;
+      if (minsAway <= 0) continue;                       // already started
+
+      const when = new Date(meetingMs).toLocaleString('en-US', {
+        timeZone: CHURCH_TZ, weekday: 'short', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit'
+      });
+      const who  = a.memberName || 'a member';
+      const how  = a.mode === 'online' ? 'online (Zoom)' : 'in person';
+      const to   = [uid, ...adminUids];
+
+      // Member and minister get different wording — "one-on-one with Ana" reads
+      // oddly when you are Ana.
+      const push2 = (suffix, title, memberBody, ministerBody) => {
+        jobs.push({ key: `${suffix}-m-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
+                    title, body: memberBody });
+        if (adminUids.length) {
+          jobs.push({ key: `${suffix}-a-${uid}-${apptId}`, pref: 'oneonone', to: adminUids,
+                      title, body: ministerBody });
+        }
+      };
+
+      // Above an hour out, send the day-before reminder. Inside the final hour
+      // only the 1-hour one is relevant — "tomorrow" would be plainly wrong.
+      if (minsAway <= 24 * 60 && minsAway > 60) {
+        push2('appt24', 'Meeting tomorrow',
+          `Your one-on-one with your minister is ${when} — ${a.duration} min, ${how}.`,
+          `One-on-one with ${who}, ${when} — ${a.duration} min, ${how}.`);
+      }
+      if (minsAway <= 60) {
+        push2('appt1', 'Meeting in 1 hour',
+          `Your one-on-one with your minister is at ${when} — ${how}.`,
+          `One-on-one with ${who} at ${when} — ${how}.`);
+      }
+    }
+  }
+
   const due = jobs.filter(j => !sentLog[j.key]);
   if (!due.length) {
     // Distinguish "nothing is scheduled for now" from "it went out already" —
@@ -148,6 +215,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   for (const job of due) {
     let sent = 0, skipped = 0;
     for (const [uid, sub] of Object.entries(subs)) {
+      if (job.to && !job.to.includes(uid)) continue;   // targeted at specific people
       if (prefsFor(uid)[job.pref] !== true) { skipped++; continue; }
       try {
         await webpush.sendNotification(

@@ -62,6 +62,21 @@
         }
       },
 
+      "appointments": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$uid": {
+          ".read":  "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+          "$appt": {
+            ".validate": "newData.hasChildren(['date', 'time', 'mode', 'purpose', 'duration', 'status'])",
+            "status": {
+              ".validate": "newData.isString() && (root.child('church/users').child(auth.uid).child('role').val() === 'admin' || newData.val() === 'pending' || newData.val() === 'cancelled')"
+            },
+            "uid": { ".validate": "newData.val() === $uid" }
+          }
+        }
+      },
+
       "accounts": {
         ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
         ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
