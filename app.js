@@ -88,7 +88,13 @@ function saveUsers(users) {
   });
   profilesByUid = byUid;
   rebuildUsersCache();
-  usersRef.set(byUid).catch(err => {
+  // Per-uid writes: the rules grant .write on church/users/$uid but NOT on
+  // church/users itself, and in Firebase a child grant never authorises a write
+  // at the parent. A whole-map set() is therefore always denied — and would
+  // delete any profile not present in the map even if it were allowed.
+  Promise.all(Object.entries(byUid).map(([uid, profile]) =>
+    usersRef.child(uid).set(profile)
+  )).catch(err => {
     console.error('Account sync error:', err);
     showToast('Could not sync accounts — admin permission required.', 'error');
   });
@@ -3507,14 +3513,12 @@ function initSettings() {
 
 function saveUserSettings(patch) {
   // Scoped to this member's own node — never the whole settings map.
-  settingsRef.child(currentUser.uid).update(patch).catch(() => {
-    // localStorage fallback
+  settingsRef.child(currentUser.uid).update(patch).catch(err => {
+    console.error('Could not save settings:', err);
+    // Fall back to the member's own profile node, which is writable by them.
     if (patch.displayName) {
-      const users = getUsers();
-      if (users[currentUser.username]) {
-        users[currentUser.username].displayName = patch.displayName;
-        saveUsers(users);
-      }
+      const p = myProfile();
+      if (p) saveUserProfile(currentUser.uid, { ...p, displayName: patch.displayName });
     }
     if (patch.notifPrefs) localStorage.setItem(NOTIF_KEY, JSON.stringify(patch.notifPrefs));
   });
