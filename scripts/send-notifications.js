@@ -11,6 +11,8 @@
  *   oneonone  — a new request (to ministers), the minister's decision (to the
  *               member), and 24-hour / 1-hour reminders before an approved
  *               meeting (to both)
+ *   events    — a newly added event (to everyone)
+ *   live      — a stream going live (to everyone)
  *   prayer    — a new prayer request (to ministers)
  *   sorei     — a new ancestor service request (to ministers), and a reminder
  *               to the member the day before a requested service date
@@ -157,6 +159,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   console.log(`— prayer requests: ${Object.keys(prayers).length} · sorei requests: ${Object.keys(soreis).length} —`);
 
+  // Anything older than this is treated as pre-existing and never announced,
+  // so switching a notification type on cannot flood everyone with a backlog.
+  const RECENT_DAYS = 3;
+  const recentEnough = iso => {
+    const t = Date.parse(iso || '');
+    return !isNaN(t) && (Date.now() - t) < RECENT_DAYS * 86400000;
+  };
+
   const jobs = [];
 
   // 1. Daily Inspiration — any scheduled message whose moment has passed today.
@@ -287,15 +297,36 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // sent-to-nobody job as done meant that switching a preference on afterwards
   // could never recover the notification.
   const delivered = k => sentLog[k] && (sentLog[k].sent || 0) > 0;
+  // 3b. New events — announced to everyone. Only events carrying a recent
+  //     createdAt qualify, so the existing list is never announced in bulk.
+  const events = Array.isArray(data.events) ? data.events : Object.values(data.events || {});
+  for (const e of events) {
+    if (!e || !e.createdAt || !recentEnough(e.createdAt)) continue;
+    jobs.push({
+      key: `event-${e.id}`, pref: 'events',
+      title: e.title || 'New event',
+      body: [e.date, e.desc].filter(Boolean).join(' — ').slice(0, 140)
+    });
+  }
+
+  // 3c. Live stream — announced when a platform is switched on. The key carries
+  //     the activation stamp, so switching it on again next week announces
+  //     again rather than being treated as already sent.
+  const live = data.liveEvents || {};
+  for (const [platform, l] of Object.entries(live)) {
+    if (!l || !l.active || !l.activatedAt) continue;
+    const startedMs = Date.parse(l.activatedAt);
+    if (isNaN(startedMs) || Date.now() - startedMs > 3 * 3600000) continue;  // only while fresh
+    jobs.push({
+      key: `live-${platform}-${l.activatedAt}`, pref: 'live',
+      title: "We're live now",
+      body: `${l.label || platform} has started. Open the app to watch.`
+    });
+  }
+
   // 4. Prayer requests — tell the ministers one arrived. Deliberately WITHOUT
   //    the prayer text: these are private, and a push payload shows on a lock
   //    screen. The minister opens the Inbox to read it.
-  const RECENT_DAYS = 3;
-  const recentEnough = iso => {
-    const t = Date.parse(iso || '');
-    return !isNaN(t) && (Date.now() - t) < RECENT_DAYS * 86400000;
-  };
-
   if (adminUids.length) {
     for (const [id, r] of Object.entries(prayers)) {
       if (!r || !recentEnough(r.submittedAt)) continue;   // don't dredge up old ones

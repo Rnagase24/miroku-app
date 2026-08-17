@@ -1486,10 +1486,18 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
     document.getElementById('save-live-btn').addEventListener('click', () => {
       if (!appData.liveEvents) appData.liveEvents = {};
       PLATFORMS.forEach(p => {
+        const prev  = appData.liveEvents[p.key] || {};
+        const isOn  = document.getElementById('live-active-' + p.key).checked;
+        // Keep the original stamp while it stays live; a fresh one each time it
+        // is switched on again, so going live next week announces again.
+        const stamp = isOn
+          ? ((prev.active && prev.activatedAt) ? prev.activatedAt : new Date().toISOString())
+          : null;
         appData.liveEvents[p.key] = {
           label:  document.getElementById('live-label-' + p.key).value.trim() || p.label,
           url:    document.getElementById('live-url-' + p.key).value.trim(),
-          active: document.getElementById('live-active-' + p.key).checked
+          active: isOn,
+          ...(stamp ? { activatedAt: stamp } : {})
         };
       });
       saveData();
@@ -2283,9 +2291,12 @@ function openEventModal(id) {
       if (!title) return;
       if (id) {
         const idx = appData.events.findIndex(e => e.id === id);
-        if (idx >= 0) appData.events[idx] = { id, date, title, desc, tag };
+        // Spread the existing record so createdAt survives an edit — otherwise
+        // editing an event would announce it again as if it were new.
+        if (idx >= 0) appData.events[idx] = { ...appData.events[idx], id, date, title, desc, tag };
       } else {
-        appData.events.push({ id: nextId(appData.events), date, title, desc, tag });
+        appData.events.push({ id: nextId(appData.events), date, title, desc, tag,
+                              createdAt: new Date().toISOString() });
       }
       saveData(); closeModal();
     });
