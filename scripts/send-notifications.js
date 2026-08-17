@@ -146,6 +146,30 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   }
   console.log(`— settings entries: ${Object.keys(settings).length} —`);
 
+  // The list above only shows people who HAVE a subscription. Someone whose
+  // toggle looks on but never saved one is invisible there — and receives
+  // nothing. Cross-reference every account against pushSubs to surface them.
+  const wantsSomething = uid => Object.values(prefsFor(uid)).some(v => v === true);
+  const orphans = Object.keys(users).filter(uid => !subs[uid] && wantsSomething(uid));
+  const silent  = Object.keys(users).filter(uid => !subs[uid] && !wantsSomething(uid));
+
+  console.log(`— accounts: ${Object.keys(users).length} total, ${Object.keys(subs).length} with a push subscription —`);
+  if (orphans.length) {
+    console.log(`  !! ${orphans.length} account(s) have notifications switched ON but NO subscription`);
+    console.log('     (their toggle did not save, or their device never registered — they receive nothing)');
+    for (const uid of orphans) {
+      const p = prefsFor(uid);
+      console.log(`     ${mask(uid)} role=${(users[uid] || {}).role || '?'} `
+        + `on=[${Object.keys(p).filter(k => p[k] === true).join(',')}]`);
+    }
+  }
+  if (silent.length) {
+    console.log(`  ${silent.length} account(s) have no subscription and nothing switched on:`);
+    for (const uid of silent) {
+      console.log(`     ${mask(uid)} role=${(users[uid] || {}).role || '?'}`);
+    }
+  }
+
   // Server-side truth about what is actually stored, so a "sent" request that
   // appears nowhere can be confirmed or ruled out from the log.
   const apptTotal = Object.values(apptsByUser)
