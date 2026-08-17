@@ -25,7 +25,9 @@
 
       "settings": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        "$uid": {
+          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
+        }
       },
 
       "signinLog": {

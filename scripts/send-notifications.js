@@ -320,7 +320,13 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // Only a job that actually reached somebody counts as delivered. Recording a
   // sent-to-nobody job as done meant that switching a preference on afterwards
   // could never recover the notification.
-  const delivered = k => sentLog[k] && (sentLog[k].sent || 0) > 0;
+  // Delivered is per recipient. Recording it per job meant that if the admin
+  // succeeded and a member's push failed, the member never got another attempt.
+  const deliveredTo = (k, uid) => {
+    const e = sentLog[k];
+    if (!e || !e.to || typeof e.to !== 'object') return false;  // legacy entries: retry
+    return e.to[uid] === true;
+  };
   // 3b. New events — announced to everyone. Only events carrying a recent
   //     createdAt qualify, so the existing list is never announced in bulk.
   const events = Array.isArray(data.events) ? data.events : Object.values(data.events || {});
@@ -342,7 +348,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     const startedMs = Date.parse(l.activatedAt);
     if (isNaN(startedMs) || Date.now() - startedMs > 3 * 3600000) continue;  // only while fresh
     jobs.push({
-      key: `live-${platform}-${l.activatedAt}`, pref: 'live',
+      // Milliseconds, not the ISO string: a Firebase key cannot contain '.'
+      key: `live-${platform}-${startedMs}`, pref: 'live',
       title: "We're live now",
       body: `${l.label || platform} has started. Open the app to watch.`
     });
@@ -395,12 +402,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     });
   }
 
-  const due = jobs.filter(j => !delivered(j.key));
+  const anyPending = j => Object.keys(subs).some(uid =>
+    (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true && !deliveredTo(j.key, uid));
+  const due = jobs.filter(anyPending);
   if (!due.length) {
     // Distinguish "nothing is scheduled for now" from "it went out already" —
     // reading the first as the second sends you hunting for a bug that is not there.
     console.log(jobs.length
-      ? `Nothing new to send — ${jobs.length} due item(s) already reached their recipients.`
+      ? `Nothing new to send — ${jobs.length} item(s) already reached everyone who wants them.`
       : 'Nothing due right now (no message scheduled for today, and no service today).');
     return;
   }
@@ -408,26 +417,39 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // ── deliver ──
   const stale = [];
   for (const job of due) {
-    let sent = 0, skipped = 0;
-    for (const [uid, sub] of Object.entries(subs)) {
-      if (job.to && !job.to.includes(uid)) continue;   // targeted at specific people
-      if (prefsFor(uid)[job.pref] !== true) { skipped++; continue; }
-      try {
-        await webpush.sendNotification(
-          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify({ title: job.title, body: job.body, tag: job.pref, url: './' })
-        );
-        sent++;
-      } catch (err) {
-        // 404/410 mean the member uninstalled or revoked — drop the record.
-        if (err.statusCode === 404 || err.statusCode === 410) stale.push(uid);
-        else console.error(`  ${uid}: ${err.statusCode || ''} ${err.message}`);
+    // A malformed job must not take the rest of the run down with it.
+    try {
+      let sent = 0, skipped = 0, already = 0;
+      const reached = {};
+      for (const [uid, sub] of Object.entries(subs)) {
+        if (job.to && !job.to.includes(uid)) continue;      // targeted at specific people
+        if (prefsFor(uid)[job.pref] !== true) { skipped++; continue; }
+        if (deliveredTo(job.key, uid)) { already++; continue; }
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            JSON.stringify({ title: job.title, body: job.body, tag: job.pref, url: './' })
+          );
+          reached[uid] = true;
+          sent++;
+        } catch (err) {
+          // 404/410 mean the member uninstalled or revoked — drop the record.
+          if (err.statusCode === 404 || err.statusCode === 410) stale.push(uid);
+          else console.error(`  ${mask(uid)}: ${err.statusCode || ''} ${err.message}`);
+        }
       }
+      if (sent) {
+        const prev = (sentLog[job.key] && sentLog[job.key].to) || {};
+        await db.ref('church/pushLog').child(job.key)
+          .set({ sentAt: new Date().toISOString(), to: { ...prev, ...reached } });
+      }
+      console.log(`${job.key}: sent ${sent}`
+        + (already ? `, ${already} already had it` : '')
+        + (skipped ? `, ${skipped} have it turned off` : '')
+        + (sent === 0 ? ' — will retry' : ''));
+    } catch (err) {
+      console.error(`${job.key}: FAILED (${err.message}) — continuing with the other jobs`);
     }
-    await db.ref('church/pushLog').child(job.key).set({ sentAt: new Date().toISOString(), sent });
-    console.log(`${job.key}: sent ${sent}`
-      + (skipped ? `, skipped ${skipped} (notification turned off)` : '')
-      + (sent === 0 ? ' — will retry until someone receives it' : ''));
   }
 
   for (const uid of [...new Set(stale)]) {

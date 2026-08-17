@@ -755,6 +755,7 @@ function showApp(visible) {
     initInstallBanner();
     loadAppVersion();
     renderNotifStatus();
+    refreshPushSubscriptionIfWanted();
 
     const wire = {
       'request-meeting-btn':  () => openRequestMeetingModal('oneonone'),
@@ -3505,13 +3506,8 @@ function initSettings() {
 }
 
 function saveUserSettings(patch) {
-  settingsRef.once('value').then(snap => {
-    const data = snap.exists() ? snap.val() : {};
-    // Keyed by uid, not username: the username is derived in two places and a
-    // mismatch silently loses the setting.
-    data[currentUser.uid] = Object.assign(data[currentUser.uid] || data[currentUser.username] || {}, patch);
-    settingsRef.set(data);
-  }).catch(() => {
+  // Scoped to this member's own node — never the whole settings map.
+  settingsRef.child(currentUser.uid).update(patch).catch(() => {
     // localStorage fallback
     if (patch.displayName) {
       const users = getUsers();
@@ -3640,29 +3636,81 @@ function isIOS() {
 // Store the browser's push subscription against the member so the sender can
 // reach them. Called whenever a notification preference is switched on.
 async function ensurePushSubscription() {
-  if (!pushSupported() || !currentUser) return { ok: false, reason: 'unsupported' };
+  if (!currentUser) return { ok: false, reason: 'unsupported' };
+  // Check iOS-needs-install FIRST. On a non-Safari iOS browser PushManager is
+  // absent, so the generic "unsupported" branch would win and tell the member
+  // their browser cannot do notifications — a dead end, when the real answer is
+  // to add the app to the Home Screen.
   if (isIOS() && !isInstalled()) return { ok: false, reason: 'ios-needs-install' };
+  if (!pushSupported())          return { ok: false, reason: 'unsupported' };
 
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return { ok: false, reason: 'denied' };
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return { ok: false, reason: 'denied' };
 
-  const reg = await navigator.serviceWorker.ready;
-  let sub = await reg.pushManager.getSubscription();
-  if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+
+    // A subscription made with a DIFFERENT VAPID key is useless: the push
+    // service rejects anything we sign with the current one. Replace it.
+    if (sub) {
+      const existing = sub.options && sub.options.applicationServerKey;
+      if (existing && !sameServerKey(existing, VAPID_PUBLIC_KEY)) {
+        try { await sub.unsubscribe(); } catch {}
+        sub = null;
+      }
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    const json = sub.toJSON();
+    await pushSubsRef.child(currentUser.uid).set({
+      uid:       currentUser.uid,
+      endpoint:  json.endpoint,
+      p256dh:    json.keys.p256dh,
+      auth:      json.keys.auth,
+      updatedAt: new Date().toISOString()
     });
+    return { ok: true };
+  } catch (err) {
+    // Previously this threw past the caller, leaving the toggle visually on
+    // with nothing saved and nothing said.
+    console.error('Push subscription failed:', err);
+    return { ok: false, reason: 'error', message: err && (err.message || err.name) };
   }
-  const json = sub.toJSON();
-  await pushSubsRef.child(currentUser.uid).set({
-    uid:       currentUser.uid,
-    endpoint:  json.endpoint,
-    p256dh:    json.keys.p256dh,
-    auth:      json.keys.auth,
-    updatedAt: new Date().toISOString()
-  });
-  return { ok: true };
+}
+
+// Compare the key an existing subscription was created with against ours.
+function sameServerKey(buf, b64) {
+  try {
+    const a = new Uint8Array(buf);
+    const b = urlBase64ToUint8Array(b64);
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  } catch { return true; }   // can't tell — keep what we have rather than churn
+}
+
+// Subscriptions are removed by the sender when a push service reports them
+// dead, and browsers can drop them on their own. Nothing used to re-create one,
+// so a member silently fell out of the list forever. Re-assert it at every
+// sign-in for anyone who has asked for notifications.
+async function refreshPushSubscriptionIfWanted() {
+  if (!currentUser || !pushSupported()) return;
+  if (isIOS() && !isInstalled()) return;
+  if (Notification.permission !== 'granted') return;   // never prompt unasked here
+  try {
+    const snap = await settingsRef.once('value');
+    const data = snap.exists() ? snap.val() : {};
+    const prefs = ((data[currentUser.uid] || data[currentUser.username] || {}).notifPrefs) || {};
+    if (!Object.values(prefs).some(v => v === true)) return;   // they want nothing
+    const res = await ensurePushSubscription();
+    if (res.ok) renderNotifStatus();
+  } catch (err) {
+    console.error('Could not refresh push subscription:', err);
+  }
 }
 
 async function removePushSubscription() {
@@ -3739,8 +3787,10 @@ async function renderNotifStatus() {
   const bad  = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#c0392b'; };
   const good = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#15803d'; };
 
+  // iOS first: on a non-Safari iOS browser PushManager is missing, and telling
+  // the member their browser is unsupported hides the actionable answer.
+  if (isIOS() && !isInstalled())   return bad('<strong>Add to Home Screen first.</strong> On iPhone, open this page in <strong>Safari</strong>, tap Share, then "Add to Home Screen", and open the app from there.');
   if (!pushSupported())            return bad('<strong>Not available.</strong> This browser cannot receive notifications.');
-  if (isIOS() && !isInstalled())   return bad('<strong>Add to Home Screen first.</strong> On iPhone, notifications only work from the installed app — tap Share, then "Add to Home Screen", and open it from there.');
   if (Notification.permission === 'denied')
                                    return bad('<strong>Blocked.</strong> Allow notifications for this app in your phone settings, then switch one on below.');
 
@@ -3780,7 +3830,9 @@ async function handleNotifToggle(key, enabled) {
 
   if (el) el.checked = false;
   renderNotifStatus();
-  if (res.reason === 'ios-needs-install') {
+  if (res.reason === 'error') {
+    showToast('Could not switch that on: ' + (res.message || 'unknown error') + '. Please try again.', 'error');
+  } else if (res.reason === 'ios-needs-install') {
     showToast('On iPhone, add the app to your Home Screen first to receive notifications.', 'error');
     showInstallBanner(true);
   } else if (res.reason === 'denied') {
@@ -3790,19 +3842,18 @@ async function handleNotifToggle(key, enabled) {
   }
 }
 
+// Write only this member's own leaf. The previous whole-map read-modify-write
+// meant one member's toggle rewrote EVERYONE's preferences from a stale
+// snapshot, silently reverting anyone who changed a setting in between.
 function updateNotifPref(key, value) {
-  settingsRef.once('value').then(snap => {
-    const data = snap.exists() ? snap.val() : {};
-    const userSettings = data[currentUser.uid] || data[currentUser.username] || {};
-    userSettings.notifPrefs = userSettings.notifPrefs || {};
-    userSettings.notifPrefs[key] = value;
-    data[currentUser.uid] = userSettings;      // uid, never a derived username
-    settingsRef.set(data);
-  }).catch(() => {
-    const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
-    prefs[key] = value;
-    localStorage.setItem(NOTIF_KEY, JSON.stringify(prefs));
-  });
+  return settingsRef.child(currentUser.uid).child('notifPrefs').child(key).set(value)
+    .catch(err => {
+      console.error('Could not save notification preference:', err);
+      showToast('Could not save that setting — please try again.', 'error');
+      const prefs = JSON.parse(localStorage.getItem(NOTIF_KEY) || '{}');
+      prefs[key] = value;
+      localStorage.setItem(NOTIF_KEY, JSON.stringify(prefs));
+    });
 }
 
 // ── Modal system ──
