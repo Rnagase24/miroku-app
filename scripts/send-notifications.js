@@ -11,6 +11,9 @@
  *   oneonone  — a new request (to ministers), the minister's decision (to the
  *               member), and 24-hour / 1-hour reminders before an approved
  *               meeting (to both)
+ *   prayer    — a new prayer request (to ministers)
+ *   sorei     — a new ancestor service request (to ministers), and a reminder
+ *               to the member the day before a requested service date
  *
  * Everything already delivered is recorded under church/pushLog so a message
  * is never sent twice, however often this runs.
@@ -90,12 +93,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const now = parts();
   console.log(`Run at ${now.date} ${now.time} (${CHURCH_TZ})`);
 
-  const [subsSnap, dataSnap, settingsSnap, logSnap, apptSnap] = await Promise.all([
+  const [subsSnap, dataSnap, settingsSnap, logSnap, apptSnap, prayerSnap, soreiSnap] = await Promise.all([
     db.ref('church/pushSubs').once('value'),
     db.ref('church/data').once('value'),
     db.ref('church/settings').once('value'),
     db.ref('church/pushLog').once('value'),
-    db.ref('church/appointments').once('value')
+    db.ref('church/appointments').once('value'),
+    db.ref('church/prayerRequests').once('value'),
+    db.ref('church/soreiRequests').once('value')
   ]);
 
   const subs     = subsSnap.val()     || {};
@@ -103,6 +108,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const settings = settingsSnap.val() || {};
   const sentLog  = logSnap.val()      || {};
   const apptsByUser = apptSnap.val()  || {};
+  const prayers     = prayerSnap.val() || {};
+  const soreis      = soreiSnap.val()  || {};
 
   if (!Object.keys(subs).length) { console.log('No push subscriptions yet — nothing to do.'); return; }
 
@@ -147,6 +154,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       console.log(`  ${mask(auid)}/${mask(aid)} ${a.type || 'oneonone'} ${a.status} ${a.date} ${a.time}`);
     }
   }
+
+  console.log(`— prayer requests: ${Object.keys(prayers).length} · sorei requests: ${Object.keys(soreis).length} —`);
 
   const jobs = [];
 
@@ -278,6 +287,59 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // sent-to-nobody job as done meant that switching a preference on afterwards
   // could never recover the notification.
   const delivered = k => sentLog[k] && (sentLog[k].sent || 0) > 0;
+  // 4. Prayer requests — tell the ministers one arrived. Deliberately WITHOUT
+  //    the prayer text: these are private, and a push payload shows on a lock
+  //    screen. The minister opens the Inbox to read it.
+  const RECENT_DAYS = 3;
+  const recentEnough = iso => {
+    const t = Date.parse(iso || '');
+    return !isNaN(t) && (Date.now() - t) < RECENT_DAYS * 86400000;
+  };
+
+  if (adminUids.length) {
+    for (const [id, r] of Object.entries(prayers)) {
+      if (!r || !recentEnough(r.submittedAt)) continue;   // don't dredge up old ones
+      jobs.push({
+        key: `prayer-${id}`, pref: 'prayer', to: adminUids,
+        title: 'New prayer request',
+        body: `${r.memberName || 'A member'} submitted a request`
+            + (r.formTitle ? ` (${r.formTitle})` : '')
+            + '. Open the Prayer Inbox to read it.'
+      });
+    }
+
+    // 5. Ancestor service requests — same idea, to the ministers.
+    for (const [id, r] of Object.entries(soreis)) {
+      if (!r || !recentEnough(r.submittedAt)) continue;
+      jobs.push({
+        key: `sorei-${id}`, pref: 'sorei', to: adminUids,
+        title: 'New ancestor service request',
+        body: `${r.memberName || 'A member'} requested ${r.serviceLabel || 'a service'}`
+            + (r.ancestorName ? ` for ${r.ancestorName}` : '')
+            + (r.desiredDate ? `, ${r.desiredDate}` : '') + '.'
+      });
+    }
+  }
+
+  // 6. Ancestor service reminder — the day before a requested date, to the
+  //    member who asked for it. This is what the "Sorei Reminders" toggle
+  //    promises members, as opposed to the minister-facing item above.
+  for (const [id, r] of Object.entries(soreis)) {
+    if (!r || !r.desiredDate || !r.uid) continue;
+    if (r.status === 'cancelled' || r.status === 'declined') continue;
+    const at = new Date(`${r.desiredDate}T09:00:00${tzOffset(r.desiredDate)}`).getTime();
+    if (isNaN(at)) continue;
+    const hoursAway = (at - Date.now()) / 3600000;
+    if (hoursAway <= 0 || hoursAway > 24) continue;       // only the day before
+    jobs.push({
+      key: `soreiremind-${id}`, pref: 'sorei', to: [r.uid],
+      title: 'Ancestor service tomorrow',
+      body: `${r.serviceLabel || 'Your ancestor service'}`
+          + (r.ancestorName ? ` for ${r.ancestorName}` : '')
+          + ` is tomorrow, ${r.desiredDate}.`
+    });
+  }
+
   const due = jobs.filter(j => !delivered(j.key));
   if (!due.length) {
     // Distinguish "nothing is scheduled for now" from "it went out already" —
