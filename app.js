@@ -3598,6 +3598,11 @@ function loadAppVersion() {
   navigator.serviceWorker.ready
     .then(reg => { if (reg.active) reg.active.postMessage('version'); })
     .catch(() => {});
+
+  // Don't leave the label reading "checking…" forever if no reply arrives.
+  setTimeout(() => {
+    if (APP_VERSION === 'checking…') { APP_VERSION = 'version unknown'; renderNotifStatus(); }
+  }, 4000);
 }
 
 const VAPID_PUBLIC_KEY = 'BGq8bv1aasEYZI8pQTLKT7LO0BQUiK5jiX3SI8xlDFqOpGRvkKq4b-m2mR2YcRTEjcv5C16n6Y1C-3hl6K0YeE4';
@@ -3732,11 +3737,21 @@ async function renderNotifStatus() {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
     if (!sub)                      return bad('<strong>Not set up on this device.</strong> Switch on a notification below to register this phone.');
-    const saved = await pushSubsRef.child(currentUser.uid).once('value');
-    if (!saved.exists())           return bad('<strong>Almost there.</strong> This phone is registered but not saved to the church database — switch a notification off and on again.');
+    // Confirming the server copy is a bonus check, not a requirement. If it
+    // cannot be read, the browser subscription is still the thing that matters,
+    // so say so plainly rather than showing the member a database error.
+    try {
+      const saved = await pushSubsRef.child(currentUser.uid).once('value');
+      if (!saved.exists()) {
+        return bad('<strong>Almost there.</strong> This phone is registered but not saved to the church database — switch a notification off and on again.');
+      }
+    } catch {
+      return good('<strong>Active on this device.</strong> You will receive the notifications ticked below.');
+    }
     good('<strong>Active on this device.</strong> You will receive the notifications ticked below.');
   } catch (err) {
-    bad('<strong>Could not check.</strong> ' + esc(err.message || 'Unknown error'));
+    console.error('Notification status check failed:', err);
+    bad('<strong>Could not check.</strong> Notifications may still work — try switching one off and on.');
   }
 }
 
