@@ -121,13 +121,17 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const users = usersSnap.val() || {};
   // Settings are keyed by uid. Older records were keyed by a derived username,
   // so fall back to that until every device has written a uid-keyed entry.
+  // Merge, never short-circuit. settings/{uid} can exist holding only a
+  // displayName — short-circuiting on the entry meant that masked any legacy
+  // username-keyed notifPrefs and the member silently received nothing.
   const prefsFor = uid => {
     const profile = users[uid] || {};
-    const entry = settings[uid]
-               || settings[profile.username]
-               || settings[(profile.email || '').split('@')[0]]
-               || {};
-    return entry.notifPrefs || {};
+    const at = k => (k && settings[k] && settings[k].notifPrefs) || {};
+    return {
+      ...at((profile.email || '').split('@')[0]),
+      ...at(profile.username),
+      ...at(uid)                       // uid-keyed wins where present
+    };
   };
 
   // One compact line per subscriber so a mismatch is visible in the log rather
@@ -136,10 +140,10 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   console.log('— subscribers —');
   for (const uid of Object.keys(subs)) {
     const profile = users[uid] || {};
-    const via = settings[uid] ? 'uid'
-              : settings[profile.username] ? 'username'
-              : settings[(profile.email || '').split('@')[0]] ? 'email-prefix'
-              : 'NO SETTINGS ENTRY';
+    const has = k => !!(k && settings[k] && settings[k].notifPrefs);
+    const via = [has(uid) && 'uid', has(profile.username) && 'username',
+                 has((profile.email || '').split('@')[0]) && 'email-prefix']
+                .filter(Boolean).join('+') || 'NO PREFS ANYWHERE';
     const p = prefsFor(uid);
     console.log(`  ${mask(uid)} role=${profile.role || '?'} settingsVia=${via} `
       + `on=[${Object.keys(p).filter(k => p[k] === true).join(',') || 'none'}]`);
@@ -195,12 +199,20 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   // 1. Daily Inspiration — any scheduled message whose moment has passed today.
   const messages = Array.isArray(data.messages) ? data.messages : Object.values(data.messages || {});
+  const LOOKBACK_H = 12;
   for (const m of messages) {
     if (!m || !m.scheduledDate) continue;
-    if (m.scheduledDate !== now.date) continue;
-    if ((m.scheduledTime || '00:00') > now.time) continue;      // not due yet
+    const dueMs = Date.parse(`${m.scheduledDate}T${m.scheduledTime || '00:00'}:00${tzOffset(m.scheduledDate)}`);
+    if (isNaN(dueMs)) continue;
+    const hoursPast = (Date.now() - dueMs) / 3600000;
+    // A window, not same-day equality: the scheduler skips runs, so a message
+    // due at 23:50 would otherwise be missed permanently once the date rolls.
+    if (hoursPast < 0 || hoursPast > LOOKBACK_H) continue;
     jobs.push({
-      key:  `dailyword-${m.scheduledDate}-${m.id}`,
+      // The stamp makes an edited message a different notification, so fixing
+      // the wording and re-scheduling actually sends. Numeric: keys cannot
+      // contain '.'.
+      key:  `dailyword-${m.scheduledDate}-${m.id}-${Number(m.updatedAt) || 0}`,
       pref: 'dailyword',
       title: m.title || 'Daily Inspiration',
       body:  String(m.text || '').slice(0, 140)
@@ -221,6 +233,25 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
         pref: 'services',
         title: svc.title || 'Service today',
         body:  `Today${svc.time ? ' at ' + svc.time : ''}. We look forward to seeing you.`
+      });
+    }
+
+    // Johrei times are presented to members the same way service times are, so
+    // they get the same morning reminder. Namespaced key: ids can collide
+    // across the two lists.
+    const johrei = Array.isArray(data.johreiSessions)
+      ? data.johreiSessions : Object.values(data.johreiSessions || {});
+    for (const j of johrei) {
+      const rec = j && j.recurrence;
+      if (!rec || typeof rec.weekday !== 'number') continue;
+      if (rec.weekday !== now.weekday) continue;
+      const nths = Array.isArray(rec.nths) ? rec.nths : [];
+      if (nths.length && !nths.includes(nthOfMonth(now.day))) continue;
+      jobs.push({
+        key:  `johrei-${now.date}-${j.id}`,
+        pref: 'services',
+        title: j.title || 'Johrei today',
+        body:  `Today${j.time ? ' at ' + j.time : ''}.`
       });
     }
   }
@@ -257,8 +288,11 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
       // The decision, sent to the member. Bounded to meetings still ahead, so
       // enabling notifications later cannot dredge up old outcomes.
+      // Bound on when the minister decided, not on the meeting time: a late
+      // reply is exactly when the member most needs to hear it.
+      const decidedRecently = a.decidedAt ? recentEnough(a.decidedAt) : false;
       const stillAhead = new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`).getTime() > Date.now();
-      if (a.status === 'approved' && stillAhead) {
+      if (a.status === 'approved' && (stillAhead || decidedRecently)) {
         jobs.push({
           key: `apptok-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
           title: isJohrei ? 'Johrei session confirmed' : 'Meeting confirmed',
@@ -266,7 +300,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
               + `${a.mode === 'online' ? 'online (Zoom)' : 'in person'}.`
         });
       }
-      if (a.status === 'declined' && stillAhead) {
+      if (a.status === 'declined' && (stillAhead || decidedRecently)) {
         jobs.push({
           key: `apptno-${uid}-${apptId}`, pref: 'oneonone', to: [uid],
           title: `Your ${kind} request was not approved`,
@@ -304,7 +338,12 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
       // Above an hour out, send the day-before reminder. Inside the final hour
       // only the 1-hour one is relevant — "tomorrow" would be plainly wrong.
-      if (minsAway <= 24 * 60 && minsAway > 60) {
+      // Only call it "tomorrow" when it genuinely is. Approving at 09:00 for a
+      // 15:00 slot used to send "Meeting tomorrow" showing today's date.
+      const meetingDay = new Intl.DateTimeFormat('en-CA', { timeZone: CHURCH_TZ })
+        .format(new Date(meetingMs));
+      const isTomorrow = meetingDay !== now.date;
+      if (minsAway <= 24 * 60 && minsAway > 60 && isTomorrow) {
         push2('appt24', isJohrei ? 'Johrei tomorrow' : 'Meeting tomorrow',
           `Your ${kind} with your minister is ${when} — ${a.duration} min${extra}, ${how}.`,
           `${isJohrei ? 'Johrei' : 'One-on-one'} with ${who}, ${when} — ${a.duration} min${extra}, ${how}.${phone}`);
@@ -458,9 +497,12 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   }
 
   // Keep the log from growing without bound.
+  // Removing a pushLog entry licenses a re-send, so prune the OLDEST by time —
+  // sorting by key name deleted every appt* record first and re-announced them.
   const keys = Object.keys({ ...sentLog });
   if (keys.length > 400) {
-    await Promise.all(keys.sort().slice(0, keys.length - 200)
+    const age = k => Date.parse((sentLog[k] || {}).sentAt || 0) || 0;
+    await Promise.all(keys.sort((a, b) => age(a) - age(b)).slice(0, keys.length - 200)
       .map(k => db.ref('church/pushLog').child(k).remove()));
   }
 

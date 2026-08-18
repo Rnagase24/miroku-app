@@ -390,7 +390,13 @@ function saveData() {
 }
 
 function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
-function nextId(arr) { return arr.length ? Math.max(...arr.map(x => x.id)) + 1 : 1; }
+// Monotonic, never recycled. Deriving the id from the current array meant
+// deleting an item freed its id for reuse, and a new item could inherit a
+// pushLog entry saying its notification had already been sent.
+function nextId(arr) {
+  const max = (arr || []).reduce((n, x) => Math.max(n, Number(x && x.id) || 0), 0);
+  return Math.max(max + 1, Date.now());
+}
 
 // Firebase Realtime DB returns null for empty arrays; ensure fields are always real arrays
 function ensureArray(val, fallback = []) {
@@ -1093,7 +1099,8 @@ function openScheduleModal() {
       const scripture = document.getElementById('new-msg-scripture').value.trim();
       if (!text) return;
       if (!appData.messages) appData.messages = [];
-      appData.messages.push({ id: nextId(appData.messages), scheduledDate: date, scheduledTime: time, title, text, scripture });
+      appData.messages.push({ id: nextId(appData.messages), updatedAt: Date.now(),
+                              scheduledDate: date, scheduledTime: time, title, text, scripture });
       saveData();
       openScheduleModal();
     });
@@ -1146,6 +1153,10 @@ function openEditMessageModal(id) {
       if (idx < 0) return;
       appData.messages[idx] = {
         id,
+        // Numeric stamp so the sender can tell an edited message from the one
+        // it already sent, and re-send it. Numeric because a Firebase key may
+        // not contain the '.' an ISO string carries.
+        updatedAt:     Date.now(),
         scheduledDate: document.getElementById('edit-msg-date').value,
         scheduledTime: document.getElementById('edit-msg-time').value,
         title:         document.getElementById('edit-msg-title').value.trim(),
