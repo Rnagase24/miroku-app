@@ -69,9 +69,13 @@ function saveUserProfile(uid, profile) {
   delete clean.password; // never persist a password again
   profilesByUid = { ...(profilesByUid || {}), [uid]: clean };
   rebuildUsersCache();
+  // Rejects on failure. Swallowing the error here meant every caller awaited a
+  // promise that always resolved, so signup and Settings both reported "saved"
+  // for a profile that never reached the server. Callers that genuinely do not
+  // care (background lastSeen touches) catch it themselves.
   return usersRef.child(uid).set(clean).catch(err => {
     console.error('Profile sync error:', err);
-    showToast('Could not save to the server — check your connection.', 'error');
+    throw err;
   });
 }
 
@@ -143,7 +147,8 @@ function logSignIn() {
   if (!currentUser) return;
   const now = new Date().toISOString();
   const p   = myProfile();
-  if (p) saveUserProfile(currentUser.uid, { ...p, lastSeen: now });
+  // Background touch — nobody is waiting on it, so a failure stays in the log.
+  if (p) saveUserProfile(currentUser.uid, { ...p, lastSeen: now }).catch(() => {});
   signinLogRef.push({
     uid:         currentUser.uid,
     username:    currentUser.username,
@@ -492,7 +497,9 @@ auth.onAuthStateChanged(async user => {
       role:        'member',
       profileComplete: false
     };
-    await saveUserProfile(user.uid, profile);
+    // Seeding may fail (offline, rules); the member still gets in with the
+    // profile above held in memory, and the next sign-in tries again.
+    await saveUserProfile(user.uid, profile).catch(() => {});
   }
 
   currentUser = {
@@ -727,18 +734,27 @@ document.getElementById('signup-form').addEventListener('submit', async e => {
     const cred = await auth.createUserWithEmailAndPassword(email.toLowerCase(), password);
     const uid  = cred.user.uid;
 
-    await saveUserProfile(uid, {
-      role:            'member',
-      displayName:     firstName + ' ' + lastName,
-      username:        username || String(email).split('@')[0].toLowerCase(),
-      firstName,
-      lastName,
-      email:           email.toLowerCase(),
-      phone,
-      address:         '',
-      profileComplete: true,
-      lastSeen:        new Date().toISOString()
-    });
+    // If this fails the member has a login but no profile — no role, no name,
+    // and no entry in the minister's member list. That has to be said out loud
+    // rather than covered by a "your account is ready" toast.
+    try {
+      await saveUserProfile(uid, {
+        role:            'member',
+        displayName:     firstName + ' ' + lastName,
+        username:        username || String(email).split('@')[0].toLowerCase(),
+        firstName,
+        lastName,
+        email:           email.toLowerCase(),
+        phone,
+        address:         '',
+        profileComplete: true,
+        lastSeen:        new Date().toISOString()
+      });
+    } catch {
+      errEl.textContent = 'Your login was created but your details could not be saved. '
+                        + 'Please check your connection and sign in — the app will ask for them again.';
+      return;
+    }
 
     ['signup-first','signup-last','signup-username','signup-email','signup-phone','signup-password','signup-confirm']
       .forEach(id => { document.getElementById(id).value = ''; });
@@ -1936,8 +1952,17 @@ async function cancelMeeting(id, type = 'oneonone') {
     return;
   }
   if (!confirm('Cancel this meeting with your minister?')) return;
-  await appointmentsRef.child(currentUser.uid).child(id)
-    .update({ status: 'cancelled', cancelledAt: new Date().toISOString() });
+  // A rejected write used to throw out of here with nothing shown at all: the
+  // member pressed Cancel, confirmed, and the meeting simply stayed put.
+  try {
+    await appointmentsRef.child(currentUser.uid).child(id)
+      .update({ status: 'cancelled', cancelledAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('Cancel error:', err);
+    showToast(`Could not cancel (${(err && (err.code || err.message)) || 'unknown error'}). `
+            + 'Please try again, or contact your minister directly.', 'error');
+    return;
+  }
   showToast('Cancelled. Your minister has been notified.', 'info');
   renderMyAppointments(type);
 }
@@ -3467,9 +3492,15 @@ function openMandatoryProfileModal(user) {
     }
 
     const displayName = firstName + ' ' + lastName;
-    await saveUserProfile(currentUser.uid, {
-      ...existing, firstName, lastName, address, phone, displayName, profileComplete: true
-    });
+    try {
+      await saveUserProfile(currentUser.uid, {
+        ...existing, firstName, lastName, address, phone, displayName, profileComplete: true
+      });
+    } catch (err) {
+      msgEl.textContent = `Could not save your details (${(err && (err.code || err.message)) || 'unknown error'}). `
+                        + 'Please check your connection and try again.';
+      return;
+    }
     currentUser.displayName = displayName;
 
     overlay.remove();
@@ -3538,7 +3569,7 @@ function saveUserSettings(patch) {
     // Fall back to the member's own profile node, which is writable by them.
     if (patch.displayName) {
       const p = myProfile();
-      if (p) saveUserProfile(currentUser.uid, { ...p, displayName: patch.displayName });
+      if (p) saveUserProfile(currentUser.uid, { ...p, displayName: patch.displayName }).catch(() => {});
     }
     if (patch.notifPrefs) localStorage.setItem(NOTIF_KEY, JSON.stringify(patch.notifPrefs));
   });
@@ -3582,6 +3613,12 @@ async function saveProfile() {
       const cred = firebase.auth.EmailAuthProvider.credential(auth.currentUser.email, currentPw);
       await auth.currentUser.reauthenticateWithCredential(cred);
       await auth.currentUser.updatePassword(newPw);
+      // The password change has already taken effect. Clear the fields now, so
+      // that if the profile write below fails, retrying does not re-submit a
+      // "current password" that is no longer current.
+      document.getElementById('settings-current-pw').value = '';
+      document.getElementById('settings-new-pw').value     = '';
+      document.getElementById('settings-confirm-pw').value = '';
     } catch (err) {
       msgEl.textContent = (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential')
         ? 'Current password is incorrect.'
@@ -3592,9 +3629,18 @@ async function saveProfile() {
   }
 
   const displayName = (firstName && lastName) ? firstName + ' ' + lastName : (firstName || lastName || user.displayName || currentUser.username);
-  await saveUserProfile(currentUser.uid, {
-    ...user, firstName, lastName, address, phone, displayName, profileComplete: true
-  });
+  // "Profile saved!" used to appear even when the write was rejected, because
+  // the save swallowed its own error.
+  try {
+    await saveUserProfile(currentUser.uid, {
+      ...user, firstName, lastName, address, phone, displayName, profileComplete: true
+    });
+  } catch (err) {
+    msgEl.textContent = `Could not save your profile (${(err && (err.code || err.message)) || 'unknown error'}). `
+                      + 'Please check your connection and try again.';
+    msgEl.className = 'settings-msg error';
+    return;
+  }
 
   currentUser.displayName = displayName;
   saveUserSettings({ displayName });

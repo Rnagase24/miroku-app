@@ -286,6 +286,20 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
         });
       }
 
+      // A member cancelling — tell the ministers. Without this the app told the
+      // member "your minister has been notified" and nothing was ever sent, so
+      // the minister could sit waiting on Zoom for a meeting called off days
+      // earlier. Bounded by when it was cancelled, not by the meeting time: a
+      // cancellation is news the moment it happens.
+      if (a.status === 'cancelled' && adminUids.length
+          && a.cancelledAt && recentEnough(a.cancelledAt)) {
+        jobs.push({
+          key: `apptcancel-${uid}-${apptId}`, pref: 'oneonone', to: adminUids,
+          title: isJohrei ? 'Johrei session cancelled' : 'Meeting cancelled',
+          body: `${nameOf} cancelled the ${kind} scheduled for ${whenLabel(a)}.${phone}`
+        });
+      }
+
       // The decision, sent to the member. Bounded to meetings still ahead, so
       // enabling notifications later cannot dredge up old outcomes.
       // Bound on when the minister decided, not on the meeting time: a late
