@@ -358,7 +358,9 @@ function subscribeData() {
       if (!appData.youtube)    appData.youtube    = { channelId: '', apiKey: '' };
       if (!appData.donations)  appData.donations  = DEFAULT_DATA.donations;
       if (appData.soreiRules === undefined) appData.soreiRules = '';
-    } else {
+    } else if (isAdmin()) {
+      // Seeding church/data is an admin-only write. Attempting it as a member
+      // just produced a permission error nobody saw.
       churchRef.set(appData).catch(err => console.error('Init error:', err));
     }
     renderAll();
@@ -3487,9 +3489,16 @@ function initSettings() {
   setVal('settings-phone',      user.phone);
 
   // Load notification prefs from settingsRef
-  settingsRef.once('value').then(snap => {
-    const data = snap.exists() ? snap.val() : {};
-    const prefs = (data[currentUser.uid] || data[currentUser.username] || {}).notifPrefs || {};
+  // Read only this member's own node. Reading church/settings wholesale handed
+  // every member everyone else's preferences and display names.
+  Promise.all([
+    settingsRef.child(currentUser.uid).once('value'),
+    settingsRef.child(currentUser.username).once('value').catch(() => null)
+  ]).then(([mine, legacy]) => {
+    const prefs = {
+      ...(((legacy && legacy.val()) || {}).notifPrefs || {}),
+      ...((mine.val() || {}).notifPrefs || {})
+    };
     NOTIF_KEYS.forEach(key => {
       const el = document.getElementById('notif-' + key);
       if (el) el.checked = !!(prefs[key]);

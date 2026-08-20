@@ -24,8 +24,8 @@
       },
 
       "settings": {
-        ".read": "auth != null",
         "$uid": {
+          ".read": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
           ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
         }
       },

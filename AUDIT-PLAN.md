@@ -58,7 +58,7 @@ by the `admin-only` class plus `body.is-admin`.
 
 | # | Part | Status | Result |
 |---|---|---|---|
-| 1 | **Rules vs operations** — inventory every read/write in `app.js`; for each, the exact path and whether `database.rules.json` permits it for a member and for an admin. Flag every silent denial. | TODO | |
+| 1 | **Rules vs operations** — inventory every read/write in `app.js`; for each, the exact path and whether `database.rules.json` permits it for a member and for an admin. Flag every silent denial. | DONE 2026-08-18 | 24 operations checked. 2 real: member seeded church/data (admin-only write, silent denial); member read the whole settings map to find their own prefs. Both fixed; settings reads now restricted per-uid in the rules. |
 | 2 | **Silent failures on member paths** — signup, prayer request, booking a meeting or Johrei, cancelling, saving a profile, toggling notifications. What the member sees vs what happened. | TODO | |
 | 3 | **Regression check** — verify every fix shipped so far is correct, complete, and applied everywhere the pattern occurs. Especially: remaining truthy-return `forEach`, every pushLog key legal for all inputs, the per-recipient log shape vs old entries, scoped settings writes vs the whole-map read in `initSettings`. | TODO | |
 | 4 | **Notification sender, end to end** — all seven types, dedupe, timezone and DST, midnight rollover, ordering, what happens with 0 / 1 / many subscribers, and every path that can throw. | TODO | |
