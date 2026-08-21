@@ -137,6 +137,25 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // One compact line per subscriber so a mismatch is visible in the log rather
   // than guessed at. Masked: these logs are public on a public repository.
   const mask = v => { const t = String(v || ''); return t ? t.slice(0, 2) + '…(' + t.length + ')' : '(none)'; };
+
+  // Fold legacy username- and email-keyed preferences into the uid-keyed node.
+  // The sender reads them either way, but the app no longer can: a member may
+  // only read church/settings/{their own uid}, so anything still filed under an
+  // old key showed every toggle as off — and touching one wrote a uid-keyed
+  // entry that then masked the rest. Runs here because only this job has the
+  // access to read one member's node and write another's. Idempotent: once the
+  // uid node agrees with the merged view there is nothing left to write.
+  for (const uid of Object.keys(users)) {
+    const merged = prefsFor(uid);
+    if (!Object.keys(merged).length) continue;
+    const current = (settings[uid] && settings[uid].notifPrefs) || {};
+    const same = Object.keys(merged).every(k => current[k] === merged[k])
+              && Object.keys(current).length === Object.keys(merged).length;
+    if (same) continue;
+    await db.ref('church/settings').child(uid).child('notifPrefs').update(merged);
+    settings[uid] = { ...(settings[uid] || {}), notifPrefs: merged };
+    console.log(`Moved notification preferences to the uid key for ${mask(uid)}`);
+  }
   console.log('— subscribers —');
   for (const uid of Object.keys(subs)) {
     const profile = users[uid] || {};

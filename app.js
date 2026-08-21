@@ -3772,9 +3772,17 @@ async function refreshPushSubscriptionIfWanted() {
   if (isIOS() && !isInstalled()) return;
   if (Notification.permission !== 'granted') return;   // never prompt unasked here
   try {
-    const snap = await settingsRef.once('value');
-    const data = snap.exists() ? snap.val() : {};
-    const prefs = ((data[currentUser.uid] || data[currentUser.username] || {}).notifPrefs) || {};
+    // Per-uid, like initSettings. Reading the whole settings map is denied for
+    // everyone now that a member can only read their own node — which silently
+    // killed this refresh, the one thing keeping members subscribed.
+    const [mine, legacy] = await Promise.all([
+      settingsRef.child(currentUser.uid).once('value'),
+      settingsRef.child(currentUser.username).once('value').catch(() => null)
+    ]);
+    const prefs = {
+      ...(((legacy && legacy.val()) || {}).notifPrefs || {}),
+      ...((mine.val() || {}).notifPrefs || {})
+    };
     if (!Object.values(prefs).some(v => v === true)) return;   // they want nothing
     const res = await ensurePushSubscription();
     if (res.ok) renderNotifStatus();
