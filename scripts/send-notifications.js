@@ -26,6 +26,9 @@ const webpush  = require('web-push');
 
 const CHURCH_TZ = 'America/Los_Angeles';
 
+// Every preference this sender acts on. Must match NOTIF_KEYS in app.js.
+const PREF_KEYS = ['dailyword', 'services', 'oneonone', 'events', 'live', 'prayer', 'sorei'];
+
 // ── setup ──
 const required = ['FIREBASE_SERVICE_ACCOUNT', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'];
 const missing  = required.filter(k => !process.env[k]);
@@ -113,8 +116,6 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const prayers     = prayerSnap.val() || {};
   const soreis      = soreiSnap.val()  || {};
 
-  if (!Object.keys(subs).length) { console.log('No push subscriptions yet — nothing to do.'); return; }
-
   // Map uid -> notification preferences. Settings are keyed by username, so
   // resolve through the profile list.
   const usersSnap = await db.ref('church/users').once('value');
@@ -145,16 +146,25 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // entry that then masked the rest. Runs here because only this job has the
   // access to read one member's node and write another's. Idempotent: once the
   // uid node agrees with the merged view there is nothing left to write.
-  for (const uid of Object.keys(users)) {
-    const merged = prefsFor(uid);
-    if (!Object.keys(merged).length) continue;
-    const current = (settings[uid] && settings[uid].notifPrefs) || {};
-    const same = Object.keys(merged).every(k => current[k] === merged[k])
-              && Object.keys(current).length === Object.keys(merged).length;
-    if (same) continue;
-    await db.ref('church/settings').child(uid).child('notifPrefs').update(merged);
-    settings[uid] = { ...(settings[uid] || {}), notifPrefs: merged };
-    console.log(`Moved notification preferences to the uid key for ${mask(uid)}`);
+  // Housekeeping must never cost anyone a notification: if this fails, log it
+  // and go on to send.
+  try {
+    for (const uid of Object.keys(users)) {
+      // Only the preferences this sender actually acts on. Copying anything
+      // else forward would re-establish dead keys — 'classes' outlived the
+      // Classes section it belonged to — under the key the app now reads.
+      const all = prefsFor(uid);
+      const merged = {};
+      for (const k of PREF_KEYS) if (k in all) merged[k] = all[k];
+      if (!Object.keys(merged).length) continue;
+      const current = (settings[uid] && settings[uid].notifPrefs) || {};
+      if (Object.keys(merged).every(k => current[k] === merged[k])) continue;
+      await db.ref('church/settings').child(uid).child('notifPrefs').update(merged);
+      settings[uid] = { ...(settings[uid] || {}), notifPrefs: merged };
+      console.log(`Moved notification preferences to the uid key for ${mask(uid)}`);
+    }
+  } catch (err) {
+    console.error(`Could not tidy notification preferences (${err.message}) — sending anyway`);
   }
   console.log('— subscribers —');
   for (const uid of Object.keys(subs)) {
@@ -213,6 +223,11 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     const t = Date.parse(iso || '');
     return !isNaN(t) && (Date.now() - t) < RECENT_DAYS * 86400000;
   };
+
+  // Bailing out here rather than at the top: with nobody subscribed there is
+  // nothing to send, but the diagnostics above and the preference tidy-up are
+  // exactly what gets the first person subscribed again.
+  if (!Object.keys(subs).length) { console.log('No push subscriptions yet — nothing to send.'); return; }
 
   const jobs = [];
 
@@ -474,6 +489,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     });
   }
 
+  // A key is built from stored data, and a Firebase key may not contain
+  // . # $ [ ] or /. An illegal one throws on the pushLog write — after the
+  // push has gone out — so the delivery is never recorded and the same
+  // notification goes out again on every run, for ever. Normalise here, in the
+  // one place every key passes through, so the dedupe check and the log write
+  // can never disagree about what a job is called.
+  for (const j of jobs) j.key = String(j.key).replace(/[.#$[\]/]/g, '_');
+
   const anyPending = j => Object.keys(subs).some(uid =>
     (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true && !deliveredTo(j.key, uid));
   const due = jobs.filter(anyPending);
@@ -526,7 +549,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   for (const uid of [...new Set(stale)]) {
     await db.ref('church/pushSubs').child(uid).remove();
-    console.log(`Removed dead subscription for ${uid}`);
+    console.log(`Removed dead subscription for ${mask(uid)}`);  // public log — never raw
   }
 
   // Keep the log from growing without bound.
