@@ -3758,13 +3758,24 @@ function loadAppVersion() {
       renderNotifStatus();
     }
   });
-  navigator.serviceWorker.ready
+  const ask = () => navigator.serviceWorker.ready
     .then(reg => { if (reg.active) reg.active.postMessage('version'); })
     .catch(() => {});
+  ask();
 
-  // Don't leave the label reading "checking…" forever if no reply arrives.
+  // A new service worker taking over means the version has changed. Ask again
+  // rather than leaving the label showing the one that was replaced.
+  navigator.serviceWorker.addEventListener('controllerchange', () => { ask(); });
+
+  // Don't leave the label reading "checking…" forever if no reply arrives —
+  // an older service worker, still installed on the device, has no answer to
+  // give. Ask once more first, in case the worker was not active yet.
   setTimeout(() => {
-    if (APP_VERSION === 'checking…') { APP_VERSION = 'version unknown'; renderNotifStatus(); }
+    if (APP_VERSION !== 'checking…') return;
+    ask();
+    setTimeout(() => {
+      if (APP_VERSION === 'checking…') { APP_VERSION = 'version unknown'; renderNotifStatus(); }
+    }, 3000);
   }, 4000);
 }
 
@@ -3944,12 +3955,29 @@ window.addEventListener('appinstalled', () => {
 
 // Shows exactly why notifications are or aren't working on THIS device.
 // Without it a failure is invisible: the toggle just quietly does nothing.
+// Guards against an earlier, slower run overwriting a later one. This call
+// awaits the service worker, the browser subscription and the database, and
+// several things trigger it at once at sign-in.
+let notifStatusRun = 0;
+
 async function renderNotifStatus() {
   const el = document.getElementById('notif-status');
   if (!el) return;
-  const tail = ` <span style="opacity:.6">(app ${APP_VERSION})</span>`;
-  const bad  = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#c0392b'; };
-  const good = msg => { el.innerHTML = msg + tail; el.style.borderColor = '#15803d'; };
+  const mine = ++notifStatusRun;
+  // Read the version when the text is WRITTEN, not when this call started. It
+  // used to be captured up front, before three awaits — so the run that began
+  // while the version was still "checking…" finished last and pasted that back
+  // over the real one. The label then stayed on "checking…" for ever, and
+  // because the version had in fact arrived, the timeout meant to catch a
+  // missing reply never fired either.
+  const tail = () => ` <span style="opacity:.6">(app ${APP_VERSION})</span>`;
+  const write = (msg, colour) => {
+    if (mine !== notifStatusRun) return;   // a newer run has taken over
+    el.innerHTML = msg + tail();
+    el.style.borderColor = colour;
+  };
+  const bad  = msg => write(msg, '#c0392b');
+  const good = msg => write(msg, '#15803d');
 
   // iOS first: on a non-Safari iOS browser PushManager is missing, and telling
   // the member their browser is unsupported hides the actionable answer.
