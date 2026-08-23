@@ -253,11 +253,44 @@ async function migrateLegacyAccount(email, password) {
 
 async function logout() {
   unsubscribeData();
+  unwatchRole();
+  // Drop the server's copy of this device's push subscription while we still
+  // have the permission to. The subscription belongs to the browser, not the
+  // account: leaving it filed under the departing member means that on a shared
+  // phone the next person to sign in receives their notifications — prayer
+  // requests included. Signing back in re-creates it.
+  if (currentUser) {
+    await pushSubsRef.child(currentUser.uid).remove().catch(() => {});
+  }
   if ('credentials' in navigator) {
     navigator.credentials.preventSilentAccess().catch(() => {});
   }
   try { await auth.signOut(); } catch {}
 }
+
+// A role change used to take effect only at the next sign-in: a newly promoted
+// minister saw no admin controls and reported that it had not worked, while
+// someone demoted kept a screen full of buttons whose every write the rules
+// refuse. Watch this member's own role and follow it.
+let roleWatch = null;
+function watchRole(uid) {
+  unwatchRole();
+  const ref = usersRef.child(uid).child('role');
+  const handler = snap => {
+    const role = snap.val() === 'admin' ? 'admin' : 'member';
+    if (!currentUser || role === currentUser.role) return;
+    currentUser.role = role;
+    document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
+    document.body.classList.toggle('is-admin', isAdmin());
+    renderAll();
+    showToast(isAdmin()
+      ? 'You now have minister access.'
+      : 'Your access level has changed.', 'info');
+  };
+  ref.on('value', handler, () => {});
+  roleWatch = () => ref.off('value', handler);
+}
+function unwatchRole() { if (roleWatch) { roleWatch(); roleWatch = null; } }
 
 // ── Default Data ──
 const DEFAULT_DATA = {
@@ -338,6 +371,10 @@ let ytVideos = [];   // auto-fetched YouTube videos
 let ytSynced = false;
 
 function subscribeData() {
+  // Idempotent: signing out and back in without a reload would otherwise stack
+  // a second listener on the same node and leak the first, since the unsubscribe
+  // handle only ever points at the most recent one.
+  unsubscribeData();
   appData = deepCopy(DEFAULT_DATA);
   renderAll();
   showLoading(true);
@@ -465,12 +502,40 @@ async function storeCredential(username, password) {
 // Firebase Auth owns the session and restores it on load, so there is no
 // manual session check any more — this listener is the single entry point.
 let authReady = false;
-const resettingPassword = new URLSearchParams(window.location.search).get('mode') === 'resetPassword';
-auth.onAuthStateChanged(async user => {
-  // A member may already be signed in when they follow a reset link; the reset
-  // form must still win.
-  if (resettingPassword && pendingOobCode !== null) return;
+
+// Set synchronously, from the URL, before anything can await. A member
+// following a reset link is usually already signed in on that device, so
+// Firebase restores the session and fires the listener below within
+// milliseconds — while verifying the reset code is still in flight. Gating on
+// the verified code meant the app opened over the top of the reset form and
+// the member could never set a new password. The URL is the only thing known
+// early enough to decide this.
+// Both parts, matching handlePasswordResetLink exactly. Gating on the mode
+// alone would hold the screen for a malformed link that shows no reset form,
+// leaving the member looking at nothing at all.
+const resetParams = new URLSearchParams(window.location.search);
+let resetFlowActive = resetParams.get('mode') === 'resetPassword' && !!resetParams.get('oobCode');
+
+// Leave the reset screen and hand control back to the normal session flow —
+// whether the member finished, went back, or the link had expired.
+function endResetFlow() {
+  if (!resetFlowActive) return;
+  resetFlowActive = false;
+  applyAuthState(auth.currentUser || null);
+}
+
+auth.onAuthStateChanged(user => {
+  // The reset form owns the screen until it is done with it.
+  if (resetFlowActive) return;
+  applyAuthState(user);
+});
+
+async function applyAuthState(user) {
   if (!user) {
+    // Also reached when Firebase ends the session on its own — a revoked token,
+    // a deleted account — not only via logout().
+    unwatchRole();
+    unsubscribeData();
     currentUser = null;
     showApp(false);
     authReady = true;
@@ -513,7 +578,7 @@ auth.onAuthStateChanged(async user => {
   showApp(true);
   logSignIn();
   authReady = true;
-});
+}
 
 // ── Password reset handled in-app ──
 // Firebase's own reset page lives on a different domain, so a password changed
@@ -569,6 +634,9 @@ async function handlePasswordResetLink() {
 document.getElementById('newpw-back-btn').addEventListener('click', () => {
   pendingOobCode = null;
   showLoginView('signin-view');
+  // If they were already signed in when they opened the link, going back should
+  // return them to the app rather than to a sign-in form they do not need.
+  endResetFlow();
 });
 
 document.getElementById('newpw-form').addEventListener('submit', async e => {
@@ -593,7 +661,10 @@ document.getElementById('newpw-form').addEventListener('submit', async e => {
     await storeCredential(email, pw);
     showLoginView('signin-view');
     showToast('Password updated — you are signed in.', 'info');
-    // onAuthStateChanged opens the app.
+    // Hand the screen back. Signing in above may not fire the listener at all
+    // when this member was already signed in as the same user, so opening the
+    // app cannot be left to it.
+    endResetFlow();
   } catch (err) {
     errEl.textContent = err.code === 'auth/invalid-action-code'
       ? 'This reset link has expired or has already been used. Please request a new one.'
@@ -781,6 +852,7 @@ function showApp(visible) {
     document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
     document.body.classList.toggle('is-admin', isAdmin());
     subscribeData();
+    watchRole(currentUser.uid);
     initSettings();
     initInstallBanner();
     loadAppVersion();
