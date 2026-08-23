@@ -1600,29 +1600,54 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
     }).join('')}
     <button class="form-btn form-btn-primary" id="save-live-btn">Save</button>
   `, () => {
-    document.getElementById('save-live-btn').addEventListener('click', () => {
+    // Read one platform straight off the form.
+    const collect = p => {
+      const prev = (appData.liveEvents || {})[p.key] || {};
+      const isOn = document.getElementById('live-active-' + p.key).checked;
+      // Keep the stamp only while this broadcast is still current. Keeping it
+      // for as long as the switch stayed on meant that leaving it on after a
+      // service — which is easy to do — froze the stamp at that first
+      // broadcast. Every service after it was already too old to announce, so
+      // going live never notified anyone again. A stamp older than the
+      // sender's window means this is a new broadcast, so stamp it now.
+      const fresh = prev.activatedAt && (Date.now() - Date.parse(prev.activatedAt)) < LIVE_FRESH_MS;
+      const stamp = isOn
+        ? ((prev.active && fresh) ? prev.activatedAt : new Date().toISOString())
+        : null;
+      return {
+        label:  document.getElementById('live-label-' + p.key).value.trim() || p.label,
+        url:    document.getElementById('live-url-' + p.key).value.trim(),
+        active: isOn,
+        ...(stamp ? { activatedAt: stamp } : {})
+      };
+    };
+
+    const applyAll = () => {
       if (!appData.liveEvents) appData.liveEvents = {};
-      PLATFORMS.forEach(p => {
-        const prev  = appData.liveEvents[p.key] || {};
-        const isOn  = document.getElementById('live-active-' + p.key).checked;
-        // Keep the stamp only while this broadcast is still current. Keeping it
-        // for as long as the switch stayed on meant that leaving it on after a
-        // service — which is easy to do — froze the stamp at that first
-        // broadcast. Every service after it was already too old to announce, so
-        // going live never notified anyone again. A stamp older than the
-        // sender's window means this is a new broadcast, so stamp it now.
-        const fresh = prev.activatedAt && (Date.now() - Date.parse(prev.activatedAt)) < LIVE_FRESH_MS;
-        const stamp = isOn
-          ? ((prev.active && fresh) ? prev.activatedAt : new Date().toISOString())
-          : null;
-        appData.liveEvents[p.key] = {
-          label:  document.getElementById('live-label-' + p.key).value.trim() || p.label,
-          url:    document.getElementById('live-url-' + p.key).value.trim(),
-          active: isOn,
-          ...(stamp ? { activatedAt: stamp } : {})
-        };
-      });
+      PLATFORMS.forEach(p => { appData.liveEvents[p.key] = collect(p); });
       saveData();
+    };
+
+    // Switching a platform takes effect immediately. It used to do nothing at
+    // all until Save was pressed — but this reads like the notification
+    // switches, which apply the moment they are touched, so switching a stream
+    // off and closing the dialog silently discarded it and it was still live
+    // the next time the app opened. Going live is also the one moment when
+    // reaching for Save is least likely.
+    PLATFORMS.forEach(p => {
+      const box = document.getElementById('live-active-' + p.key);
+      if (!box) return;
+      box.addEventListener('change', () => {
+        applyAll();
+        showToast(box.checked
+          ? `${p.label} is live — members are being notified.`
+          : `${p.label} is no longer showing as live.`, 'info');
+      });
+    });
+
+    // Save remains for the label and URL fields.
+    document.getElementById('save-live-btn').addEventListener('click', () => {
+      applyAll();
       closeModal();
     });
   });
