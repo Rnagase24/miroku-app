@@ -216,6 +216,20 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   console.log(`— prayer requests: ${Object.keys(prayers).length} · sorei requests: ${Object.keys(soreis).length} —`);
 
+  // "We went live and nobody was told" is otherwise impossible to diagnose from
+  // here: whether the switch was on, and how long the stamp had been sitting
+  // there, is the whole answer. Not personal data, so printed plainly.
+  const liveState = data.liveEvents || {};
+  console.log(`— live streaming —`);
+  for (const [platform, l] of Object.entries(liveState)) {
+    const t = Date.parse((l || {}).activatedAt || '');
+    const age = isNaN(t) ? 'no activation stamp'
+      : `switched on ${Math.round((Date.now() - t) / 60000)} min ago`;
+    console.log(`  ${platform}: ${(l || {}).active ? 'ON' : 'off'}, ${age}`
+      + (l && l.active && !isNaN(t) && Date.now() - t > 3 * 3600000
+         ? '  << too old to announce — switch it off and on again when the stream starts' : ''));
+  }
+
   // Anything older than this is treated as pre-existing and never announced,
   // so switching a notification type on cannot flood everyone with a backlog.
   const RECENT_DAYS = 3;

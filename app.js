@@ -1493,9 +1493,18 @@ function renderLiveEvents() {
   }).join('');
 }
 
+// How long one broadcast counts as current. Must match the sender's window,
+// which is what decides whether "we're live" is still worth announcing.
+const LIVE_FRESH_MS = 3 * 3600000;
+
 document.getElementById('edit-live-btn').addEventListener('click', () => {
   const le = appData.liveEvents || {};
   openModal('Edit Live Events', `
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:16px">
+      Switch <strong>Show as Live</strong> on when the stream starts and press Save —
+      that is what notifies everyone who has Live Streaming turned on. Switch it
+      off when the service ends.
+    </p>
     ${PLATFORMS.map(p => {
       const d = le[p.key] || {};
       return `
@@ -1524,10 +1533,15 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
       PLATFORMS.forEach(p => {
         const prev  = appData.liveEvents[p.key] || {};
         const isOn  = document.getElementById('live-active-' + p.key).checked;
-        // Keep the original stamp while it stays live; a fresh one each time it
-        // is switched on again, so going live next week announces again.
+        // Keep the stamp only while this broadcast is still current. Keeping it
+        // for as long as the switch stayed on meant that leaving it on after a
+        // service — which is easy to do — froze the stamp at that first
+        // broadcast. Every service after it was already too old to announce, so
+        // going live never notified anyone again. A stamp older than the
+        // sender's window means this is a new broadcast, so stamp it now.
+        const fresh = prev.activatedAt && (Date.now() - Date.parse(prev.activatedAt)) < LIVE_FRESH_MS;
         const stamp = isOn
-          ? ((prev.active && prev.activatedAt) ? prev.activatedAt : new Date().toISOString())
+          ? ((prev.active && fresh) ? prev.activatedAt : new Date().toISOString())
           : null;
         appData.liveEvents[p.key] = {
           label:  document.getElementById('live-label-' + p.key).value.trim() || p.label,
