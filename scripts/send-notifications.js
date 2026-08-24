@@ -128,11 +128,17 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const prefsFor = uid => {
     const profile = users[uid] || {};
     const at = k => (k && settings[k] && settings[k].notifPrefs) || {};
-    return {
+    const all = {
       ...at((profile.email || '').split('@')[0]),
       ...at(profile.username),
       ...at(uid)                       // uid-keyed wins where present
     };
+    // Only what this sender can actually deliver. Retired keys left in old
+    // records otherwise show up in the log as though someone were subscribed
+    // to something.
+    const known = {};
+    for (const k of PREF_KEYS) if (k in all) known[k] = all[k];
+    return known;
   };
 
   // One compact line per subscriber so a mismatch is visible in the log rather
@@ -153,11 +159,13 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       // Only the preferences this sender actually acts on. Copying anything
       // else forward would re-establish dead keys — 'classes' outlived the
       // Classes section it belonged to — under the key the app now reads.
-      const all = prefsFor(uid);
-      const merged = {};
-      for (const k of PREF_KEYS) if (k in all) merged[k] = all[k];
-      if (!Object.keys(merged).length) continue;
+      const merged = { ...prefsFor(uid) };   // already limited to known keys
       const current = (settings[uid] && settings[uid].notifPrefs) || {};
+      // Retire preferences for features that no longer exist — 'classes'
+      // outlived the Classes and Groups section by some margin. Nothing reads
+      // them, but they linger in the log making it hard to see what is real.
+      for (const k of Object.keys(current)) if (!PREF_KEYS.includes(k)) merged[k] = null;
+      if (!Object.keys(merged).length) continue;
       if (Object.keys(merged).every(k => current[k] === merged[k])) continue;
       await db.ref('church/settings').child(uid).child('notifPrefs').update(merged);
       settings[uid] = { ...(settings[uid] || {}), notifPrefs: merged };

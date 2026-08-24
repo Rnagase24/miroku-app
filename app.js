@@ -386,14 +386,23 @@ function subscribeData() {
       appData.events   = ensureArray(appData.events);
       appData.members  = ensureArray(appData.members);
       appData.media    = ensureArray(appData.media);
-      appData.services = ensureArray(appData.services, DEFAULT_DATA.services);
+      // Firebase cannot store an empty array: the key simply disappears, and an
+      // absent key is indistinguishable from one that was never set. So a list
+      // that has a starting set — services, prayer forms, Johrei times — came
+      // back from the dead the next time the app opened after the admin deleted
+      // the last item. saveData records which lists were emptied on purpose.
+      const emptied = new Set(ensureArray(appData.emptiedLists));
+      const listOf = (key, starter) =>
+        emptied.has(key) ? [] : ensureArray(appData[key], starter);
+
+      appData.services = listOf('services', DEFAULT_DATA.services);
       appData.messages = ensureArray(appData.messages);
       appData.soreiSaishi    = ensureArray(appData.soreiSaishi);
       appData.soreiSaishi    = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
-      appData.prayerForms    = ensureArray(appData.prayerForms,    DEFAULT_DATA.prayerForms);
+      appData.prayerForms    = listOf('prayerForms', DEFAULT_DATA.prayerForms);
       appData.prayerRequests = ensureArray(appData.prayerRequests);
       appData.soreiRequests  = ensureArray(appData.soreiRequests);
-      appData.johreiSessions = ensureArray(appData.johreiSessions, DEFAULT_DATA.johreiSessions);
+      appData.johreiSessions = listOf('johreiSessions', DEFAULT_DATA.johreiSessions);
       if (!appData.liveEvents) appData.liveEvents = DEFAULT_DATA.liveEvents;
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
@@ -425,7 +434,12 @@ function unsubscribeData() {
   ytVideos = []; ytSynced = false;
 }
 
+// Lists that ship with a starting set, and so need "deliberately emptied" kept
+// apart from "never set". See the note where they are loaded.
+const STARTER_LISTS = ['services', 'prayerForms', 'johreiSessions'];
+
 function saveData() {
+  appData.emptiedLists = STARTER_LISTS.filter(k => Array.isArray(appData[k]) && !appData[k].length);
   renderAll();
   churchRef.set(appData).catch(err => {
     console.error('Save error:', err);
@@ -910,7 +924,7 @@ function showApp(visible) {
     if (addPfBtn) addPfBtn.addEventListener('click', () => openPrayerFormEditor(null));
 
     // Sorei-Saishi buttons
-    ['add-enrollment-btn', 'sorei-rules-btn', 'sorei-reminders-btn'].forEach(btnId => {
+    ['add-enrollment-btn', 'sorei-rules-btn', 'sorei-reminders-btn', 'sorei-inbox-btn'].forEach(btnId => {
       const b = document.getElementById(btnId);
       if (!b) return;
       b.replaceWith(b.cloneNode(true));
@@ -921,6 +935,8 @@ function showApp(visible) {
     if (soreiRulesBtn) soreiRulesBtn.addEventListener('click', openSoreiRulesModal);
     const soreiRemBtn = document.getElementById('sorei-reminders-btn');
     if (soreiRemBtn) soreiRemBtn.addEventListener('click', openRemindersModal);
+    const soreiInboxBtn = document.getElementById('sorei-inbox-btn');
+    if (soreiInboxBtn) soreiInboxBtn.addEventListener('click', openSoreiInboxModal);
 
     const soreiSearch = document.getElementById('sorei-search');
     if (soreiSearch) {
@@ -2829,6 +2845,78 @@ function openPrayerSubmitModal(formId) {
   });
 }
 
+// Ancestor service requests were being written and never read. Members
+// submitted them, the ministers got a push, and there was nowhere in the app
+// to see one — no list, no history, nothing to look back at once the
+// notification was dismissed. Requests submitted before they moved out of
+// church/data are still sitting there, unread by anything; they are folded in
+// here the same way prayer requests were.
+function openSoreiInboxModal() {
+  openModal('Ancestor Service Requests', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  soreiRequestsRef.once('value')
+    .then(async snap => {
+      const live = [];
+      snap.forEach(c => { live.push(c.val()); });
+
+      const legacy = ensureArray(appData.soreiRequests);
+      if (legacy.length) {
+        try {
+          for (const r of legacy) await soreiRequestsRef.push(r);
+          appData.soreiRequests = [];
+          await churchRef.child('soreiRequests').set([]);
+          legacy.forEach(r => live.push(r));
+        } catch (err) {
+          console.error('Ancestor service request migration failed:', err);
+          legacy.forEach(r => live.push(r));
+        }
+      }
+      renderSoreiInbox(live);
+    })
+    .catch(err => {
+      console.error('Ancestor service inbox error:', err);
+      document.getElementById('modal-body').innerHTML =
+        '<p style="color:#c0392b;font-size:14px">Could not load service requests. Admin access is required.</p>';
+    });
+}
+
+function renderSoreiInbox(all) {
+  const requests = all.filter(Boolean)
+    .sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
+
+  if (!requests.length) {
+    document.getElementById('modal-body').innerHTML =
+      '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:24px 0">No ancestor service requests yet.</p>';
+    return;
+  }
+
+  const groups = {};
+  for (const req of requests) {
+    const k = req.serviceLabel || 'Service';
+    (groups[k] ||= []).push(req);
+  }
+
+  let html = `<p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">${requests.length} total request${requests.length !== 1 ? 's' : ''} (newest first)</p>`;
+  for (const [title, items] of Object.entries(groups)) {
+    html += `<p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin:16px 0 8px">${esc(title)} (${items.length})</p>`;
+    html += items.map(req => {
+      const submitted = req.submittedAt ? new Date(req.submittedAt) : null;
+      return `<div class="prayer-inbox-item">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
+          <span class="prayer-inbox-name">${esc(req.memberName || 'A member')}</span>
+          <span class="prayer-inbox-date">${submitted && !isNaN(submitted) ? submitted.toLocaleDateString() : ''}</span>
+        </div>
+        ${req.ancestorName ? `<div style="font-size:12px;color:var(--purple-light);margin-bottom:4px">&#9729;&#65039; ${esc(req.ancestorName)}</div>` : ''}
+        <div class="prayer-inbox-text">
+          ${req.desiredDate ? `Requested date: <strong>${esc(req.desiredDate)}</strong><br>` : ''}
+          ${req.deathDate ? `Date of passing: ${esc(req.deathDate)}<br>` : ''}
+          ${req.notes ? esc(req.notes) : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('modal-body').innerHTML = html;
+}
+
 function openPrayerInboxModal() {
   openModal('Prayer Inbox', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
   prayerRequestsRef.once('value')
@@ -3621,9 +3709,11 @@ function openMandatoryProfileModal(user) {
 
 // ── SETTINGS ──
 function initSettings() {
-  // Load profile fields from account data
-  const users = getUsers();
-  const user  = users[currentUser.username] || {};
+  // Load profile fields from account data. By uid, not by username: usernames
+  // are derived from the email prefix, so two members can share one, and the
+  // by-username cache keeps whichever was built last — which would have shown
+  // this member somebody else's address and phone number.
+  const user = myProfile() || {};
   const setVal = (id, val) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = val || ''; };
   setVal('settings-first-name', user.firstName);
   setVal('settings-last-name',  user.lastName);
