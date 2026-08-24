@@ -1532,7 +1532,9 @@ async function migrateAllLegacyAccounts() {
 // arr.push(x))` silently reads only the first record. Always use a block body.
 function openSigninLogModal() {
   openModal('Sign-in Log', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  const tok = modalToken;
   signinLogRef.orderByChild('timestamp').limitToLast(60).once('value').then(snap => {
+    if (!modalStillOpen(tok)) return;
     const entries = [];
     snap.forEach(child => { entries.unshift(child.val()); });
     if (!entries.length) {
@@ -1552,6 +1554,7 @@ function openSigninLogModal() {
           </div>`;
       }).join('')}`;
   }).catch(() => {
+    if (!modalStillOpen(tok)) return;
     document.getElementById('modal-body').innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load sign-in log. Check database rules.</p>';
   });
 }
@@ -2230,7 +2233,9 @@ function openRequestMeetingModal(type = 'oneonone') {
 // ── Minister's view of every request ──
 function openMeetingRequestsModal() {
   openModal('Meeting Requests', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  const tok = modalToken;
   appointmentsRef.once('value').then(snap => {
+    if (!modalStillOpen(tok)) return;
     const all = [];
     snap.forEach(userNode => {
       userNode.forEach(c => { all.push({ uid: userNode.key, id: c.key, ...c.val() }); });
@@ -2853,6 +2858,7 @@ function openPrayerSubmitModal(formId) {
 // here the same way prayer requests were.
 function openSoreiInboxModal() {
   openModal('Ancestor Service Requests', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  const tok = modalToken;
   soreiRequestsRef.once('value')
     .then(async snap => {
       const live = [];
@@ -2870,10 +2876,11 @@ function openSoreiInboxModal() {
           legacy.forEach(r => live.push(r));
         }
       }
-      renderSoreiInbox(live);
+      if (modalStillOpen(tok)) renderSoreiInbox(live);
     })
     .catch(err => {
       console.error('Ancestor service inbox error:', err);
+      if (!modalStillOpen(tok)) return;
       document.getElementById('modal-body').innerHTML =
         '<p style="color:#c0392b;font-size:14px">Could not load service requests. Admin access is required.</p>';
     });
@@ -2919,6 +2926,7 @@ function renderSoreiInbox(all) {
 
 function openPrayerInboxModal() {
   openModal('Prayer Inbox', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  const tok = modalToken;
   prayerRequestsRef.once('value')
     .then(async snap => {
       const live = [];
@@ -2939,10 +2947,11 @@ function openPrayerInboxModal() {
           legacy.forEach(r => live.push(r));
         }
       }
-      renderPrayerInbox(live);
+      if (modalStillOpen(tok)) renderPrayerInbox(live);
     })
     .catch(err => {
       console.error('Prayer inbox error:', err);
+      if (!modalStillOpen(tok)) return;
       document.getElementById('modal-body').innerHTML =
         '<p style="color:#c0392b;font-size:14px">Could not load prayer requests. Admin access is required.</p>';
     });
@@ -4164,7 +4173,15 @@ function updateNotifPref(key, value) {
 }
 
 // ── Modal system ──
+// Which modal is on screen. The inboxes fill themselves in after a database
+// read, and nothing stopped a slow one from writing its contents into whatever
+// modal had been opened in the meantime — close the Prayer Inbox, open Edit
+// Service Times, and the prayer list would land inside the services form.
+let modalToken = 0;
+const modalStillOpen = token => token === modalToken;
+
 function openModal(title, bodyHtml, onReady) {
+  modalToken++;
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
   document.getElementById('modal-overlay').classList.remove('hidden');
@@ -4172,10 +4189,16 @@ function openModal(title, bodyHtml, onReady) {
   if (title === 'Edit Service Times') bindServicesForm();
   if (title === 'Edit Johrei Times')  bindJohreiForm();
   if (onReady) onReady();
+  return modalToken;
 }
 
 function closeModal() {
+  modalToken++;
   document.getElementById('modal-overlay').classList.add('hidden');
+  // Emptied, not just hidden: every id inside a closed modal stayed findable by
+  // getElementById, so a stray callback could quietly write into a form nobody
+  // could see.
+  document.getElementById('modal-body').innerHTML = '';
 }
 
 document.getElementById('modal-close-btn').addEventListener('click', closeModal);

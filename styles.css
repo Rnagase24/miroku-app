@@ -289,11 +289,17 @@ body {
 }
 
 /* ── Admin-only elements ── */
-.admin-only { display: none; }
-body.is-admin .admin-only { display: inline-flex; }
+/* Hide only. Revealing an element must not also decide how it lays out: this
+   rule used to force `display: inline-flex` on everything admin-only, which
+   turned the full-width YouTube and Member Accounts panels into shrink-to-fit
+   inline boxes whose contents rendered on top of each other. Each element now
+   keeps the display its own classes give it. */
+body:not(.is-admin) .admin-only { display: none; }
 body.is-admin .card-actions { display: flex; }
 
 .section-edit-btn {
+  /* Was inherited from the admin-only rule, which no longer sets a display. */
+  display: inline-flex;
   align-items: center;
   background: rgba(32,30,29,.1);
   color: var(--text);
