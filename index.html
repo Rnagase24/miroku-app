@@ -107,6 +107,17 @@
     </div>
   </div>
 
+  <!-- Announcement popup: stays until the member closes it -->
+  <div class="announce-overlay hidden" id="announce-overlay">
+    <div class="announce-card">
+      <button class="announce-close" id="announce-close-btn" aria-label="Close">&#x2715;</button>
+      <div class="announce-badge" id="announce-badge">Announcement</div>
+      <h3 class="announce-title" id="announce-title"></h3>
+      <div class="announce-text" id="announce-text"></div>
+      <button class="announce-ok" id="announce-ok-btn">Got it</button>
+    </div>
+  </div>
+
   <!-- Header -->
   <header class="app-header hidden" id="app-header">
     <div class="header-inner">
@@ -138,6 +149,12 @@
 
     <!-- HOME TAB -->
     <section class="tab-content active" id="tab-home">
+
+      <div class="section-header admin-only" style="margin-top:4px">
+        <h3 class="section-title">Announcement</h3>
+        <button class="section-edit-btn" id="edit-announce-btn">Edit</button>
+      </div>
+      <div id="announce-admin-status" class="admin-only"></div>
 
       <div class="section-header" style="margin-top:4px">
         <h3 class="section-title">Daily Inspiration</h3>

@@ -978,7 +978,8 @@ function showApp(visible) {
       'oneonone-inbox-btn':   openMeetingRequestsModal,
       'request-johrei-btn':   openRequestJohreiModal,
       'johrei-requests-btn':  openMeetingRequestsModal,
-      'edit-johrei-btn':      openJohreiScheduleModal
+      'edit-johrei-btn':      openJohreiScheduleModal,
+      'edit-announce-btn':    openAnnouncementModal
     };
     Object.entries(wire).forEach(([id, fn]) => {
       const b = document.getElementById(id);
@@ -1235,6 +1236,7 @@ function renderYouTubeSettings() {
 
 // ── Render all ──
 function renderAll() {
+  renderAnnouncement();
   renderDailyMessage();
   renderLiveEvents();
   renderServices();
@@ -1248,6 +1250,129 @@ function renderAll() {
   renderDonations();
   renderPrayer();
   renderSoreiSaishi();
+}
+
+// ── ANNOUNCEMENTS ──
+// A message from the minister that sits in front of the app until the member
+// closes it. Dismissal is remembered per announcement, on the device, so
+// editing the message or posting a new one shows it again to everyone.
+const ANNOUNCE_SEEN_KEY = 'miroku_announce_seen';
+
+function announceSeen() {
+  try { return JSON.parse(localStorage.getItem(ANNOUNCE_SEEN_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function markAnnounceSeen(id) {
+  // Keep the last few ids only — old ones can never come round again because
+  // every save stamps a new one.
+  const seen = announceSeen().filter(x => x !== id).concat(id).slice(-20);
+  try { localStorage.setItem(ANNOUNCE_SEEN_KEY, JSON.stringify(seen)); } catch {}
+}
+
+function dismissAnnouncement() {
+  const a = (appData && appData.announcement) || {};
+  if (a.id) markAnnounceSeen(a.id);
+  document.getElementById('announce-overlay').classList.add('hidden');
+}
+
+function renderAnnouncement() {
+  const overlay = document.getElementById('announce-overlay');
+  if (!overlay) return;
+  const a = (appData && appData.announcement) || {};
+
+  // The admin's own line on the Home tab, so they can see what is live.
+  const status = document.getElementById('announce-admin-status');
+  if (status) {
+    status.innerHTML = a.active && a.title
+      ? `<div class="announce-status">Showing to members: <strong>${esc(a.title)}</strong></div>`
+      : '<div class="announce-status">No announcement is showing. Tap Edit to post one.</div>';
+  }
+
+  if (!a.active || !a.id || !(a.title || a.text)) { overlay.classList.add('hidden'); return; }
+  if (announceSeen().includes(a.id)) { overlay.classList.add('hidden'); return; }
+
+  document.getElementById('announce-badge').textContent = a.badge || 'Announcement';
+  document.getElementById('announce-title').textContent = a.title || '';
+  document.getElementById('announce-text').textContent  = a.text || '';
+  overlay.classList.remove('hidden');
+}
+
+document.getElementById('announce-close-btn').addEventListener('click', dismissAnnouncement);
+document.getElementById('announce-ok-btn').addEventListener('click', dismissAnnouncement);
+
+// Wording for the first one, offered as a draft the minister can edit or
+// replace before it goes anywhere.
+const SECURITY_NOTICE = {
+  badge: 'Important',
+  title: 'A note about your privacy',
+  text: `We reviewed how the app stores your information and made it stronger.
+
+Your personal details — your address, phone number and email — and your Sorei-Saishi records can now only be seen by you and your minister. Prayer requests were already private and stay that way.
+
+Nothing was lost, and you do not need to do anything. If you have any question about your information, please speak with your minister.`
+};
+
+function openAnnouncementModal() {
+  const a = (appData && appData.announcement) || {};
+  const draft = (a.title || a.text) ? a : SECURITY_NOTICE;
+  openModal('Announcement', `
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:16px">
+      This appears in front of the app when a member opens it, and stays until
+      they close it. Each member sees it once.
+    </p>
+    <div class="form-group"><label class="form-label">Label</label>
+      <input class="form-input" id="ann-badge" value="${esc(draft.badge || 'Announcement')}" placeholder="Announcement" /></div>
+    <div class="form-group"><label class="form-label">Title</label>
+      <input class="form-input" id="ann-title" value="${esc(draft.title || '')}" placeholder="What is this about?" /></div>
+    <div class="form-group"><label class="form-label">Message</label>
+      <textarea class="form-textarea" id="ann-text" style="min-height:170px" placeholder="Write to your members…">${esc(draft.text || '')}</textarea></div>
+    <div class="settings-toggle-row" style="margin-bottom:16px">
+      <div class="toggle-info"><div class="toggle-title">Show to members</div></div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="ann-active" ${a.active ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <p class="settings-msg error" id="ann-msg" style="margin-bottom:8px"></p>
+    <button class="form-btn form-btn-primary" id="ann-save-btn">Post to members</button>
+    <button class="form-btn" id="ann-clear-btn" style="margin-top:8px;background:rgba(32,30,29,.08)">Stop showing it</button>
+  `, () => {
+    document.getElementById('ann-save-btn').addEventListener('click', () => {
+      const title = document.getElementById('ann-title').value.trim();
+      const text  = document.getElementById('ann-text').value.trim();
+      if (!title && !text) {
+        document.getElementById('ann-msg').textContent = 'Please write a title or a message.';
+        return;
+      }
+      const prev = (appData.announcement || {});
+      const changed = title !== prev.title || text !== prev.text;
+      appData.announcement = {
+        // A new id whenever the wording changes, so a member who already closed
+        // the old one still sees the new one.
+        id:      changed || !prev.id ? Date.now() : prev.id,
+        badge:   document.getElementById('ann-badge').value.trim() || 'Announcement',
+        title, text,
+        active:  document.getElementById('ann-active').checked,
+        postedAt: new Date().toISOString()
+      };
+      // The minister should see their own announcement too, not have it
+      // silently marked as read on the device that wrote it.
+      saveData();
+      closeModal();
+      showToast(appData.announcement.active
+        ? 'Posted. Members will see it next time they open the app.'
+        : 'Saved, but not showing — switch "Show to members" on to post it.', 'info');
+    });
+
+    document.getElementById('ann-clear-btn').addEventListener('click', () => {
+      if (!appData.announcement) { closeModal(); return; }
+      appData.announcement = { ...appData.announcement, active: false };
+      saveData();
+      closeModal();
+      showToast('It will no longer be shown.', 'info');
+    });
+  });
 }
 
 // ── DAILY WORD ──
