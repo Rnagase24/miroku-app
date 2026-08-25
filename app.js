@@ -19,6 +19,17 @@ const signinLogRef = db.ref('church/signinLog');
 // and prayer requests are private to the person who sent them.
 const prayerRequestsRef = db.ref('church/prayerRequests');
 const soreiRequestsRef  = db.ref('church/soreiRequests');
+// Ancestor enrolments carry family names, dates of death and the member's own
+// contact details. They used to live inside church/data, which every signed-in
+// account may read: the list was filtered in the UI, but the whole of it was
+// one console command away for anyone who signed up. Now stored per member,
+// so the rules — not the interface — decide who can see whose.
+const soreiSaishiRef    = db.ref('church/soreiSaishi');
+// Admin-only. The YouTube API key is a credential, and church/data is readable
+// by every signed-in account — so anyone who signed up could lift the church's
+// key and spend its quota. Only the admin's browser calls YouTube now; the
+// resulting video list is published into church/data for everyone else.
+const privateRef        = db.ref('church/private');
 const pushSubsRef       = db.ref('church/pushSubs');
 // Appointments are nested per member so a member can read their own without
 // being able to read anyone else's.
@@ -104,7 +115,17 @@ function saveUsers(users) {
   });
 }
 
-async function loadProfiles() {
+// A member may read only their own profile now, so read that first — it also
+// says whether this account is allowed the rest. Reading the whole map
+// unconditionally handed every signed-in account the name, email, phone number
+// and home address of every other member.
+async function loadProfiles(uid) {
+  if (uid) {
+    const mine = await usersRef.child(uid).once('value');
+    profilesByUid = mine.exists() ? { [uid]: mine.val() } : {};
+    rebuildUsersCache();
+    if (((mine.val() || {}).role) !== 'admin') return usersCache;
+  }
   const snap = await usersRef.once('value');
   profilesByUid = snap.exists() ? snap.val() : {};
   return rebuildUsersCache();
@@ -117,7 +138,7 @@ function myProfile() {
 
 // Kept for call sites that refresh the account list before acting on it.
 async function loadUsersFromFirestore() {
-  try { await loadProfiles(); }
+  try { await loadProfiles(currentUser && currentUser.uid); }
   catch { /* offline — getUsers() falls back to the cached copy */ }
 }
 
@@ -282,6 +303,8 @@ function watchRole(uid) {
     currentUser.role = role;
     document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
     document.body.classList.toggle('is-admin', isAdmin());
+    // The enrolment subscription is scoped by role — re-open it at the new one.
+    subscribeSorei();
     renderAll();
     showToast(isAdmin()
       ? 'You now have minister access.'
@@ -397,8 +420,10 @@ function subscribeData() {
 
       appData.services = listOf('services', DEFAULT_DATA.services);
       appData.messages = ensureArray(appData.messages);
-      appData.soreiSaishi    = ensureArray(appData.soreiSaishi);
-      appData.soreiSaishi    = appData.soreiSaishi.map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
+      const strandedSorei = ensureArray(appData.soreiSaishi)
+        .map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
+      delete appData.soreiSaishi;   // its home is church/soreiSaishi now
+      if (strandedSorei.length) migrateSoreiOutOfSharedData(strandedSorei);
       appData.prayerForms    = listOf('prayerForms', DEFAULT_DATA.prayerForms);
       appData.prayerRequests = ensureArray(appData.prayerRequests);
       appData.soreiRequests  = ensureArray(appData.soreiRequests);
@@ -407,6 +432,7 @@ function subscribeData() {
       if (!appData.location)   appData.location   = DEFAULT_DATA.location;
       if (!appData.contact)    appData.contact    = DEFAULT_DATA.contact;
       if (!appData.youtube)    appData.youtube    = { channelId: '', apiKey: '' };
+      ytVideos = ensureArray(appData.ytVideos);   // published by the admin's sync
       if (!appData.donations)  appData.donations  = DEFAULT_DATA.donations;
       if (appData.soreiRules === undefined) appData.soreiRules = '';
     } else if (isAdmin()) {
@@ -416,7 +442,10 @@ function subscribeData() {
     }
     renderAll();
     showLoading(false);
-    if (!ytSynced) { ytSynced = true; refreshYouTube(); }
+    // Only the admin holds the key and does the fetching; everyone else reads
+    // the list the admin published.
+    if (!ytSynced && isAdmin()) { ytSynced = true; loadYouTubeConfig().then(refreshYouTube); }
+    else renderMedia();
   };
 
   const errHandler = err => {
@@ -429,7 +458,74 @@ function subscribeData() {
   dataUnsubscribe = () => churchRef.off('value', handler);
 }
 
+// Which member an enrolment belongs to. Entries the admin has not linked to an
+// account go under a key nobody's uid can match, so only an admin can read them.
+function soreiOwner(entry) {
+  const u = (entry && entry.memberUsername) || '';
+  const linked = u && (getUsers() || {})[u];
+  return (linked && linked.uid) || '_unassigned';
+}
+
+// Admin-only write, so the whole node goes at once.
+function saveSorei() {
+  const byOwner = {};
+  for (const e of appData.soreiSaishi || []) {
+    if (!e || e.id == null) continue;
+    (byOwner[soreiOwner(e)] ||= {})[e.id] = e;
+  }
+  renderAll();
+  return soreiSaishiRef.set(byOwner).catch(err => {
+    console.error('Enrolment save error:', err);
+    showToast('⚠️ Could not save [' + (err.code || err.message || 'unknown') + ']', 'error');
+  });
+}
+
+let soreiUnsubscribe = null;
+
+function subscribeSorei() {
+  unsubscribeSorei();
+  if (!currentUser) return;
+  // An admin reads every member's; a member may read only their own branch.
+  const ref     = isAdmin() ? soreiSaishiRef : soreiSaishiRef.child(currentUser.uid);
+  const depth   = isAdmin() ? 2 : 1;
+  const handler = snap => {
+    const val = snap.val() || {};
+    const flat = depth === 2
+      ? Object.values(val).flatMap(byId => Object.values(byId || {}))
+      : Object.values(val);
+    appData.soreiSaishi = flat.filter(Boolean).map(e => ({ ...e, ancestors: ensureArray(e.ancestors) }));
+    renderSoreiSaishi();
+  };
+  ref.on('value', handler, err => console.error('Enrolment load error:', err));
+  soreiUnsubscribe = () => ref.off('value', handler);
+}
+
+function unsubscribeSorei() {
+  if (soreiUnsubscribe) { soreiUnsubscribe(); soreiUnsubscribe = null; }
+}
+
+// One-off: lift enrolments out of church/data, where every signed-in account
+// could read them, into the per-member node. Only an admin can do it, and only
+// once — after the move church/data carries none.
+async function migrateSoreiOutOfSharedData(legacy) {
+  if (!legacy.length || !isAdmin()) return;
+  try {
+    const existing = await soreiSaishiRef.once('value');
+    const byOwner = existing.val() || {};
+    for (const e of legacy) {
+      if (!e || e.id == null) continue;
+      (byOwner[soreiOwner(e)] ||= {})[e.id] = e;
+    }
+    await soreiSaishiRef.set(byOwner);
+    await churchRef.child('soreiSaishi').remove();
+    console.log(`Moved ${legacy.length} enrolment(s) out of shared data.`);
+  } catch (err) {
+    console.error('Enrolment migration failed:', err);
+  }
+}
+
 function unsubscribeData() {
+  unsubscribeSorei();
   if (dataUnsubscribe) { dataUnsubscribe(); dataUnsubscribe = null; }
   ytVideos = []; ytSynced = false;
 }
@@ -441,7 +537,10 @@ const STARTER_LISTS = ['services', 'prayerForms', 'johreiSessions'];
 function saveData() {
   appData.emptiedLists = STARTER_LISTS.filter(k => Array.isArray(appData[k]) && !appData[k].length);
   renderAll();
-  churchRef.set(appData).catch(err => {
+  // Enrolments are kept out: they have their own node, and writing them here
+  // would put them straight back where everyone can read them.
+  const { soreiSaishi, ...shared } = appData;
+  churchRef.set(shared).catch(err => {
     console.error('Save error:', err);
     showToast('⚠️ Save failed [' + (err.code || err.message || 'unknown') + ']', 'error');
   });
@@ -560,7 +659,7 @@ async function applyAuthState(user) {
   if (provisioning) { try { await provisioning; } catch {} }
 
   try {
-    await loadProfiles();
+    await loadProfiles(user.uid);
   } catch {
     // Rules deny reads until a profile exists; fall through with what we have.
   }
@@ -866,6 +965,7 @@ function showApp(visible) {
     document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
     document.body.classList.toggle('is-admin', isAdmin());
     subscribeData();
+    subscribeSorei();
     watchRole(currentUser.uid);
     initSettings();
     initInstallBanner();
@@ -956,9 +1056,11 @@ function showApp(visible) {
         btn.disabled = true;
         try {
           const channelId = await resolveChannelId(raw, apiKey);
-          if (!appData.youtube) appData.youtube = {};
-          appData.youtube.channelId = channelId;
-          appData.youtube.apiKey    = apiKey;
+          // The key goes to the admin-only node; only the channel id stays in
+          // the shared data, and only so the Media section can label itself.
+          ytConfig = { channelId, apiKey };
+          await privateRef.child('youtube').set(ytConfig);
+          appData.youtube = { channelId, apiKey: '' };
           // Update the input to show the resolved ID
           const el = document.getElementById('yt-channel-id');
           if (el) el.value = channelId;
@@ -1063,8 +1165,31 @@ async function resolveChannelId(input, apiKey) {
   throw new Error('Could not resolve channel. Try pasting your full YouTube channel URL.');
 }
 
+// The key lives in the admin-only node. Kept in memory for this session only.
+let ytConfig = null;
+async function loadYouTubeConfig() {
+  if (!isAdmin()) return null;
+  try {
+    const snap = await privateRef.child('youtube').once('value');
+    ytConfig = snap.val() || null;
+    // One-off move of a key still sitting in the shared node.
+    const legacy = (appData && appData.youtube) || {};
+    if (!ytConfig && legacy.apiKey) {
+      ytConfig = { channelId: legacy.channelId || '', apiKey: legacy.apiKey };
+      await privateRef.child('youtube').set(ytConfig);
+      await churchRef.child('youtube').set({ channelId: legacy.channelId || '', apiKey: '' });
+      appData.youtube = { channelId: legacy.channelId || '', apiKey: '' };
+      console.log('Moved the YouTube key out of shared data.');
+    }
+  } catch (err) {
+    console.error('YouTube config error:', err);
+  }
+  return ytConfig;
+}
+
 async function refreshYouTube() {
-  const yt = (appData && appData.youtube) || {};
+  if (!isAdmin()) return;
+  const yt = ytConfig || {};
   if (!yt.channelId || !yt.apiKey) return;
   try {
     const res  = await fetch(
@@ -1084,7 +1209,9 @@ async function refreshYouTube() {
       thumb:   (item.snippet.thumbnails.medium || item.snippet.thumbnails.default || {}).url || '',
       url:     'https://www.youtube.com/watch?v=' + item.id.videoId
     }));
-    renderMedia();
+    // Publish the list so members never need the key.
+    appData.ytVideos = ytVideos;
+    saveData();
   } catch (err) {
     console.error('YouTube fetch error:', err);
   }
@@ -1097,7 +1224,9 @@ function formatYTDate(iso) {
 }
 
 function renderYouTubeSettings() {
-  const yt = (appData && appData.youtube) || {};
+  // The key is only ever held in memory for an admin's session, never in the
+  // data every member can read.
+  const yt = ytConfig || (appData && appData.youtube) || {};
   const cEl = document.getElementById('yt-channel-id');
   const kEl = document.getElementById('yt-api-key');
   if (cEl && document.activeElement !== cEl) cEl.value = yt.channelId || '';
@@ -2800,8 +2929,7 @@ function openPrayerSubmitModal(formId) {
   const form  = forms.find(f => f.id === formId);
   if (!form) return;
 
-  const users = getUsers();
-  const user  = currentUser ? users[currentUser.username] : null;
+  const user = myProfile();
   const fullName = user && (user.firstName || user.lastName)
     ? ((user.firstName || '') + ' ' + (user.lastName || '')).trim()
     : (currentUser ? currentUser.displayName || '' : '');
@@ -3202,7 +3330,7 @@ function renderSoreiSaishi(filter) {
 function deleteEnrollment(id) {
   if (!confirm('Remove this member enrollment and all their ancestors?')) return;
   appData.soreiSaishi = appData.soreiSaishi.filter(e => e.id !== id);
-  saveData();
+  saveSorei();
 }
 
 function deleteAncestor(entryId, ancId) {
@@ -3210,7 +3338,7 @@ function deleteAncestor(entryId, ancId) {
   const entry = (appData.soreiSaishi || []).find(e => e.id === entryId);
   if (!entry) return;
   entry.ancestors = entry.ancestors.filter(a => a.id !== ancId);
-  saveData();
+  saveSorei();
 }
 
 function openEnrollmentModal(id) {
@@ -3246,7 +3374,7 @@ function openEnrollmentModal(id) {
       } else {
         appData.soreiSaishi.push({ id: nextId(appData.soreiSaishi), memberName, memberEmail, memberPhone, memberUsername, ancestors: [] });
       }
-      saveData(); closeModal();
+      saveSorei(); closeModal();
     });
   });
 }
@@ -3330,7 +3458,7 @@ function openAncestorModal(entryId, ancId) {
       } else {
         entry.ancestors.push({ id: nextId(entry.ancestors), name, relation, deathDate, notes, ...ancData });
       }
-      saveData(); closeModal();
+      saveSorei(); closeModal();
     });
   });
 }
@@ -3619,7 +3747,7 @@ function openRemindersModal() {
           if (a.annual) a.reminderSentYear = thisYr;
           else a.reminderSentDate = a.serviceDate;
         }
-        saveData();
+        saveSorei();
         showToast('All reminders marked as sent.', 'info');
         closeModal();
       });

@@ -5,9 +5,10 @@
 
     "church": {
       "users": {
-        ".read": "auth != null",
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
 
         "$uid": {
+          ".read":  "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
           ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
 
           "role": {
@@ -78,6 +79,19 @@
             "uid": { ".validate": "newData.val() === $uid" }
           }
         }
+      },
+
+      "soreiSaishi": {
+        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        "$owner": {
+          ".read": "auth != null && ($owner === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
+        }
+      },
+
+      "private": {
+        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
       },
 
       "accounts": {
