@@ -2,101 +2,125 @@
   "rules": {
     ".read": false,
     ".write": false,
-
     "church": {
       "users": {
-        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
         "$uid": {
-          ".read":  "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-
+          ".read": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          ".write": "auth != null && ($uid === auth.uid || ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') && !(root.child('church/users').child($uid).child('role').val() === 'owner')))",
           "role": {
-            ".validate": "newData.isString() && (newData.val() === 'member' || newData.val() === 'admin') && (root.child('church/users').child(auth.uid).child('role').val() === 'admin' || (!data.exists() && newData.val() === 'member') || newData.val() === data.val())"
+            ".validate": "newData.isString() && (newData.val() === 'owner' || newData.val() === 'admin' || newData.val() === 'collaborator' || newData.val() === 'member' || newData.val() === 'pending') && ((!data.exists() && newData.val() === 'pending') || newData.val() === data.val() || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' && $uid !== auth.uid)) || (data.val() === 'admin' && newData.val() === 'owner' && $uid === auth.uid && !root.child('church/hasOwner').exists())"
           },
-
-          "email": { ".validate": "newData.isString()" }
-        }
-      },
-
-      "data": {
-        ".read": "auth != null",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
-      },
-
-      "settings": {
-        "$uid": {
-          ".read": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
-        }
-      },
-
-      "signinLog": {
-        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$entry": {
-          ".write": "auth != null && !data.exists()",
-          ".validate": "newData.hasChildren(['uid', 'timestamp']) && newData.child('uid').val() === auth.uid"
-        }
-      },
-
-      "prayerRequests": {
-        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$req": {
-          ".write": "auth != null && !data.exists()",
-          ".validate": "newData.hasChildren(['prayerText', 'submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
-        }
-      },
-
-      "soreiRequests": {
-        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$req": {
-          ".write": "auth != null && !data.exists()",
-          ".validate": "newData.hasChildren(['submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
-        }
-      },
-
-      "pushSubs": {
-        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$uid": {
-          ".read":  "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          ".validate": "!newData.exists() || (newData.hasChildren(['endpoint', 'p256dh', 'auth']) && $uid === auth.uid)"
-        }
-      },
-
-      "appointments": {
-        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$uid": {
-          ".read":  "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          ".write": "auth != null && ($uid === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
-          "$appt": {
-            ".validate": "newData.hasChildren(['date', 'time', 'mode', 'purpose', 'duration', 'status'])",
-            "status": {
-              ".validate": "newData.isString() && (root.child('church/users').child(auth.uid).child('role').val() === 'admin' || newData.val() === 'pending' || newData.val() === 'cancelled')"
-            },
-            "uid": { ".validate": "newData.val() === $uid" }
+          "email": {
+            ".validate": "newData.isString()"
+          },
+          "perms": {
+            ".validate": "root.child('church/users').child(auth.uid).child('role').val() === 'owner' && $uid !== auth.uid"
           }
         }
       },
-
-      "soreiSaishi": {
-        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        "$owner": {
-          ".read": "auth != null && ($owner === auth.uid || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
+      "data": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending'",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "messages": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('dailyword').val() === true))"
+        },
+        "services": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('services').val() === true))"
+        },
+        "johreiSessions": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('services').val() === true))"
+        },
+        "liveEvents": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('live').val() === true))"
+        },
+        "events": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('events').val() === true))"
+        },
+        "media": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('media').val() === true))"
+        },
+        "ytVideos": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('media').val() === true))"
+        },
+        "announcement": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || (root.child('church/users').child(auth.uid).child('role').val() === 'collaborator' && root.child('church/users').child(auth.uid).child('perms').child('announce').val() === true))"
+        },
+        "emptiedLists": {
+          ".write": "auth != null && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || root.child('church/users').child(auth.uid).child('role').val() === 'collaborator')"
         }
       },
-
-      "private": {
-        ".read":  "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
+      "settings": {
+        "$uid": {
+          ".read": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          ".write": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))"
+        }
       },
-
+      "signinLog": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$entry": {
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && !data.exists()",
+          ".validate": "newData.hasChildren(['uid', 'timestamp']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+      "prayerRequests": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$req": {
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && !data.exists()",
+          ".validate": "newData.hasChildren(['prayerText', 'submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+      "soreiRequests": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$req": {
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && !data.exists()",
+          ".validate": "newData.hasChildren(['submittedAt', 'uid']) && newData.child('uid').val() === auth.uid"
+        }
+      },
+      "pushSubs": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$uid": {
+          ".read": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          ".validate": "!newData.exists() || (newData.hasChildren(['endpoint', 'p256dh', 'auth']) && $uid === auth.uid)"
+        }
+      },
+      "appointments": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$uid": {
+          ".read": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
+          "$appt": {
+            ".validate": "newData.hasChildren(['date', 'time', 'mode', 'purpose', 'duration', 'status'])",
+            "status": {
+              ".validate": "newData.isString() && ((root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin') || newData.val() === 'pending' || newData.val() === 'cancelled')"
+            },
+            "uid": {
+              ".validate": "newData.val() === $uid"
+            }
+          }
+        }
+      },
+      "soreiSaishi": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$owner": {
+          ".read": "auth != null && ($owner === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))"
+        }
+      },
+      "private": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
+      },
       "accounts": {
-        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'",
-        ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() === 'admin'"
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')"
+      },
+      "hasOwner": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists() && root.child('church/users').child(auth.uid).child('role').val() === 'owner'"
       }
     }
   }

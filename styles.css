@@ -294,8 +294,22 @@ body {
    turned the full-width YouTube and Member Accounts panels into shrink-to-fit
    inline boxes whose contents rendered on top of each other. Each element now
    keeps the display its own classes give it. */
-body:not(.is-admin) .admin-only { display: none; }
-body.is-admin .card-actions { display: flex; }
+/* "admin-only" means running the church: owner or administrator. */
+body:not(.is-manager) .admin-only { display: none; }
+body.is-manager .card-actions { display: flex; }
+
+/* Content controls a collaborator can be given one at a time. Each matches a
+   section of the data the rules grant separately — the class only decides what
+   is on screen; the rules decide what can actually be saved. */
+body:not(.can-dailyword) .perm-dailyword { display: none; }
+body:not(.can-services)  .perm-services  { display: none; }
+body:not(.can-live)      .perm-live      { display: none; }
+body:not(.can-events)    .perm-events    { display: none; }
+body:not(.can-media)     .perm-media     { display: none; }
+body:not(.can-announce)  .perm-announce  { display: none; }
+body.can-events .card-actions.perm-events,
+body.can-media  .card-actions.perm-media { display: flex; }
+body:not(.is-owner) .owner-only { display: none; }
 
 .section-edit-btn {
   /* Was inherited from the admin-only rule, which no longer sets a display. */

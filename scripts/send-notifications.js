@@ -11,6 +11,7 @@
  *   oneonone  — a new request (to ministers), the minister's decision (to the
  *               member), and 24-hour / 1-hour reminders before an approved
  *               meeting (to both)
+ *   announcements — a newly posted announcement (to everyone)
  *   events    — a newly added event (to everyone)
  *   live      — a stream going live (to everyone)
  *   prayer    — a new prayer request (to ministers)
@@ -27,7 +28,7 @@ const webpush  = require('web-push');
 const CHURCH_TZ = 'America/Los_Angeles';
 
 // Every preference this sender acts on. Must match NOTIF_KEYS in app.js.
-const PREF_KEYS = ['dailyword', 'services', 'oneonone', 'events', 'live', 'prayer', 'sorei'];
+const PREF_KEYS = ['dailyword', 'announcements', 'services', 'oneonone', 'events', 'live', 'prayer', 'sorei'];
 
 // ── setup ──
 const required = ['FIREBASE_SERVICE_ACCOUNT', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'];
@@ -445,6 +446,19 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       key: `event-${e.id}`, pref: 'events',
       title: e.title || 'New event',
       body: [e.date, e.desc].filter(Boolean).join(' — ').slice(0, 140)
+    });
+  }
+
+  // 3b-ii. A newly posted announcement. The popup only reaches someone who
+  //        opens the app; this is what makes an urgent one urgent. The key
+  //        carries the announcement's id, so editing the wording and posting
+  //        again announces again, exactly as the popup does.
+  const ann = data.announcement;
+  if (ann && ann.active && ann.id && recentEnough(ann.postedAt)) {
+    jobs.push({
+      key: `announce-${ann.id}`, pref: 'announcements',
+      title: ann.title || 'A message from your minister',
+      body: String(ann.text || '').replace(/\s+/g, ' ').trim().slice(0, 140)
     });
   }
 

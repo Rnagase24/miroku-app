@@ -186,7 +186,45 @@ function checkProfileCompletion() {
 
 let currentUser = null;
 
-function isAdmin() { return currentUser && currentUser.role === 'admin'; }
+// ── Roles ──
+//   owner         everything, including assigning roles. There can be two, so
+//                 losing one account does not lock the church out.
+//   admin         everything an owner does except assigning roles or touching
+//                 an owner's account.
+//   collaborator  only the content sections ticked for them.
+//   member        the ordinary congregation.
+//   pending       signed up, waiting to be let in. Sees nothing yet.
+const ROLES = ['owner', 'admin', 'collaborator', 'member', 'pending'];
+const MAX_OWNERS = 2;
+
+// The content areas a collaborator can be given. Each maps to one section of
+// church/data, and the rules grant exactly that section — the interface hiding
+// a button is not a permission.
+const PERMS = [
+  { key: 'dailyword', label: 'Daily Inspiration',     sections: ['messages'] },
+  { key: 'services',  label: 'Service & Johrei times', sections: ['services', 'johreiSessions'] },
+  { key: 'live',      label: 'Live streaming',        sections: ['liveEvents'] },
+  { key: 'events',    label: 'Events',                sections: ['events'] },
+  { key: 'media',     label: 'Media',                 sections: ['media', 'ytVideos'] },
+  { key: 'announce',  label: 'Announcements',         sections: ['announcement'] }
+];
+
+function roleOf()   { return (currentUser && currentUser.role) || 'member'; }
+function isOwner()  { return roleOf() === 'owner'; }
+// Everything the church runs on: content, member records, the private inboxes.
+function isManager(){ return isOwner() || roleOf() === 'admin'; }
+function isPending(){ return roleOf() === 'pending'; }
+
+// May this person edit a given content area?
+function can(perm) {
+  if (isManager()) return true;
+  if (roleOf() !== 'collaborator') return false;
+  return !!((currentUser && currentUser.perms) || {})[perm];
+}
+
+// Kept for the many call sites that mean "may run the church", not "is
+// literally an administrator".
+function isAdmin() { return isManager(); }
 
 // Turn a Firebase Auth error into something a church member can act on.
 function authErrorMessage(err) {
@@ -296,22 +334,70 @@ async function logout() {
 let roleWatch = null;
 function watchRole(uid) {
   unwatchRole();
-  const ref = usersRef.child(uid).child('role');
+  // The whole profile, not just the role: a collaborator's permissions can be
+  // changed without their role changing at all.
+  const ref = usersRef.child(uid);
   const handler = snap => {
-    const role = snap.val() === 'admin' ? 'admin' : 'member';
-    if (!currentUser || role === currentUser.role) return;
-    currentUser.role = role;
-    document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
-    document.body.classList.toggle('is-admin', isAdmin());
-    // The enrolment subscription is scoped by role — re-open it at the new one.
-    subscribeSorei();
+    const p = snap.val() || {};
+    const role  = ROLES.includes(p.role) ? p.role : 'member';
+    const perms = p.perms || {};
+    if (!currentUser) return;
+    const same = role === currentUser.role &&
+                 JSON.stringify(perms) === JSON.stringify(currentUser.perms || {});
+    if (same) return;
+    const wasPending = isPending();
+    currentUser.role  = role;
+    currentUser.perms = perms;
+    applyRoleToInterface();
+    subscribeSorei();   // scoped by role — re-open it at the new one
     renderAll();
-    showToast(isAdmin()
-      ? 'You now have minister access.'
-      : 'Your access level has changed.', 'info');
+    if (wasPending && !isPending()) {
+      showAwaitingApproval(false);
+      showToast('Your account has been approved. Welcome!', 'info');
+    } else if (isPending()) {
+      showAwaitingApproval(true);
+    } else {
+      showToast('Your access has been updated.', 'info');
+    }
   };
   ref.on('value', handler, () => {});
   roleWatch = () => ref.off('value', handler);
+}
+
+// The church starts with administrators and no owner, which would leave nobody
+// able to assign roles at all. The first administrator to sign in after the
+// change becomes the owner. The rules allow this for one's own account only,
+// and only while no owner has ever existed — once one does, the door shuts.
+async function claimFirstOwner(profile) {
+  if (!profile || profile.role !== 'admin') return;
+  try {
+    const already = await db.ref('church/hasOwner').once('value');
+    if (already.exists()) return;
+    await usersRef.child(currentUser.uid).update({ role: 'owner' });
+    await db.ref('church/hasOwner').set(true);
+    currentUser.role = 'owner';
+    profilesByUid[currentUser.uid] = { ...(profilesByUid[currentUser.uid] || {}), role: 'owner' };
+    rebuildUsersCache();
+    console.log('Owner established.');
+  } catch (err) {
+    console.error('Could not establish the owner:', err);
+  }
+}
+
+// One place that puts the current role onto the page, so the interface can
+// never drift from what the rules will actually allow.
+function applyRoleToInterface() {
+  const body = document.body;
+  body.classList.toggle('is-manager', isManager());
+  body.classList.toggle('is-owner',   isOwner());
+  body.classList.toggle('is-admin',   isManager());   // legacy hook
+  for (const p of PERMS) body.classList.toggle('can-' + p.key, can(p.key));
+  const badge = document.getElementById('admin-badge');
+  if (badge) {
+    const label = { owner: 'OWNER', admin: 'ADMIN', collaborator: 'EDITOR' }[roleOf()];
+    badge.textContent = label || '';
+    badge.classList.toggle('hidden', !label);
+  }
 }
 function unwatchRole() { if (roleWatch) { roleWatch(); roleWatch = null; } }
 
@@ -534,13 +620,36 @@ function unsubscribeData() {
 // apart from "never set". See the note where they are loaded.
 const STARTER_LISTS = ['services', 'prayerForms', 'johreiSessions'];
 
+// Write only the sections that changed.
+//
+// Everything used to be written in one go, which meant that editing the Daily
+// Inspiration also rewrote the service times, the events and the donation
+// links. That made per-section permissions impossible — a collaborator allowed
+// to post the Daily Inspiration would have been writing all of it — and it
+// silently overwrote anything another editor had changed in the meantime.
+function saveSection(...keys) {
+  appData.emptiedLists = STARTER_LISTS.filter(k => Array.isArray(appData[k]) && !appData[k].length);
+  renderAll();
+  const patch = { emptiedLists: appData.emptiedLists };
+  for (const k of keys) patch[k] = appData[k] === undefined ? null : appData[k];
+  return churchRef.update(patch).catch(err => {
+    console.error('Save error:', err);
+    showToast(err.code === 'PERMISSION_DENIED'
+      ? 'You do not have permission to change that.'
+      : '⚠️ Save failed [' + (err.code || err.message || 'unknown') + ']', 'error');
+    throw err;
+  });
+}
+
+// Whole-of-content write. Needs permission on every section, so only an owner
+// or administrator can use it; kept for the seeding path.
 function saveData() {
   appData.emptiedLists = STARTER_LISTS.filter(k => Array.isArray(appData[k]) && !appData[k].length);
   renderAll();
   // Enrolments are kept out: they have their own node, and writing them here
   // would put them straight back where everyone can read them.
   const { soreiSaishi, ...shared } = appData;
-  churchRef.set(shared).catch(err => {
+  return churchRef.update(shared).catch(err => {
     console.error('Save error:', err);
     showToast('⚠️ Save failed [' + (err.code || err.message || 'unknown') + ']', 'error');
   });
@@ -672,7 +781,7 @@ async function applyAuthState(user) {
       email:       user.email || '',
       username:    String(user.email || user.uid).split('@')[0].toLowerCase(),
       displayName: user.displayName || String(user.email || '').split('@')[0],
-      role:        'member',
+      role:        'pending',
       profileComplete: false
     };
     // Seeding may fail (offline, rules); the member still gets in with the
@@ -684,10 +793,12 @@ async function applyAuthState(user) {
     uid:         user.uid,
     email:       user.email || profile.email || '',
     username:    usernameFor(user.uid, profile),
-    role:        profile.role === 'admin' ? 'admin' : 'member',
+    role:        ROLES.includes(profile.role) ? profile.role : 'member',
+    perms:       profile.perms || {},
     displayName: profile.displayName || profile.username || user.email
   };
 
+  await claimFirstOwner(profile);
   showApp(true);
   logSignIn();
   authReady = true;
@@ -923,7 +1034,8 @@ document.getElementById('signup-form').addEventListener('submit', async e => {
     // rather than covered by a "your account is ready" toast.
     try {
       await saveUserProfile(uid, {
-        role:            'member',
+        // Waiting to be let in. The rules give a pending account nothing.
+        role:            'pending',
         displayName:     firstName + ' ' + lastName,
         username:        username || String(email).split('@')[0].toLowerCase(),
         firstName,
@@ -943,7 +1055,7 @@ document.getElementById('signup-form').addEventListener('submit', async e => {
     ['signup-first','signup-last','signup-username','signup-email','signup-phone','signup-password','signup-confirm']
       .forEach(id => { document.getElementById(id).value = ''; });
     await storeCredential(email.toLowerCase(), password);
-    showToast('Welcome, ' + firstName + '! Your account is ready.', 'info');
+    showToast('Account created. Your minister will approve it shortly.', 'info');
     // onAuthStateChanged shows the app.
   } catch (err) {
     errEl.textContent = authErrorMessage(err);
@@ -962,8 +1074,8 @@ function showApp(visible) {
   document.getElementById('bottom-nav').classList.toggle('hidden', !visible);
 
   if (visible) {
-    document.getElementById('admin-badge').classList.toggle('hidden', !isAdmin());
-    document.body.classList.toggle('is-admin', isAdmin());
+    applyRoleToInterface();
+    showAwaitingApproval(isPending());
     subscribeData();
     subscribeSorei();
     watchRole(currentUser.uid);
@@ -1065,7 +1177,7 @@ function showApp(visible) {
           // Update the input to show the resolved ID
           const el = document.getElementById('yt-channel-id');
           if (el) el.value = channelId;
-          saveData();
+          saveSection('youtube');
           ytSynced = false;
           await refreshYouTube();
           showToast('YouTube connected and synced!', 'info');
@@ -1212,7 +1324,7 @@ async function refreshYouTube() {
     }));
     // Publish the list so members never need the key.
     appData.ytVideos = ytVideos;
-    saveData();
+    saveSection('ytVideos');
   } catch (err) {
     console.error('YouTube fetch error:', err);
   }
@@ -1251,6 +1363,16 @@ function renderAll() {
   renderPrayer();
   renderSoreiSaishi();
 }
+
+// A new account can sign in but sees nothing until it is approved. The overlay
+// sits above everything and cannot be dismissed — there is nothing behind it
+// for them yet.
+function showAwaitingApproval(on) {
+  const el = document.getElementById('pending-overlay');
+  if (el) el.classList.toggle('hidden', !on);
+}
+
+document.getElementById('pending-signout-btn').addEventListener('click', () => logout());
 
 // ── ANNOUNCEMENTS ──
 // A message from the minister that sits in front of the app until the member
@@ -1358,7 +1480,7 @@ function openAnnouncementModal() {
       };
       // The minister should see their own announcement too, not have it
       // silently marked as read on the device that wrote it.
-      saveData();
+      saveSection('announcement');
       closeModal();
       showToast(appData.announcement.active
         ? 'Posted. Members will see it next time they open the app.'
@@ -1368,7 +1490,7 @@ function openAnnouncementModal() {
     document.getElementById('ann-clear-btn').addEventListener('click', () => {
       if (!appData.announcement) { closeModal(); return; }
       appData.announcement = { ...appData.announcement, active: false };
-      saveData();
+      saveSection('announcement');
       closeModal();
       showToast('It will no longer be shown.', 'info');
     });
@@ -1461,7 +1583,7 @@ function openScheduleModal() {
       if (!appData.messages) appData.messages = [];
       appData.messages.push({ id: nextId(appData.messages), updatedAt: Date.now(),
                               scheduledDate: date, scheduledTime: time, title, text, scripture });
-      saveData();
+      saveSection('messages');
       openScheduleModal();
     });
 
@@ -1470,7 +1592,7 @@ function openScheduleModal() {
         const id = parseInt(btn.dataset.delMsg, 10);
         if (!confirm('Delete this message?')) return;
         appData.messages = appData.messages.filter(m => m.id !== id);
-        saveData();
+        saveSection('messages');
         openScheduleModal();
       });
     });
@@ -1523,7 +1645,7 @@ function openEditMessageModal(id) {
         text:          document.getElementById('edit-msg-text').value.trim(),
         scripture:     document.getElementById('edit-msg-scripture').value.trim()
       };
-      saveData();
+      saveSection('messages');
       openScheduleModal();
     });
     document.getElementById('back-schedule-btn').addEventListener('click', openScheduleModal);
@@ -1533,8 +1655,15 @@ function openEditMessageModal(id) {
 // ── MEMBER ACCOUNTS ──
 function openAccountsModal() {
   const users = getUsers();
-  const list  = Object.entries(users).map(([u, d]) => ({ username: u, ...d }));
+  const all   = Object.entries(users).map(([u, d]) => ({ username: u, ...d }));
+  // Anyone waiting to be let in comes first — they cannot see anything until
+  // somebody acts on them.
+  const list  = all.slice().sort((a, b) =>
+    (b.role === 'pending') - (a.role === 'pending') || String(a.username).localeCompare(String(b.username)));
+  const waiting = list.filter(u => u.role === 'pending').length;
   openModal('Member Accounts', `
+    ${waiting ? `<div class="announce-status" style="margin-bottom:12px">
+      <strong>${waiting}</strong> account${waiting > 1 ? 's are' : ' is'} waiting for approval.</div>` : ''}
     <div style="margin-bottom:20px">
       ${list.map(u => `
         <div class="scheduled-msg-row" style="flex-direction:column;align-items:stretch;gap:6px">
@@ -1546,6 +1675,8 @@ function openAccountsModal() {
               <div class="scheduled-msg-preview">${esc(u.displayName || u.username)}</div>
             </div>
             <div style="display:flex;gap:6px;flex-shrink:0">
+              ${u.role === 'pending' ? `<button class="card-action-btn" data-approve-acct="${esc(u.username)}"
+                 style="background:#15803d;color:#fff;width:auto;padding:0 10px;font-size:12px;font-weight:700">Approve</button>` : ''}
               <button class="card-action-btn" data-edit-acct="${esc(u.username)}">&#9998;</button>
               ${u.username !== currentUser.username ? `<button class="card-action-btn delete" data-del-acct="${esc(u.username)}">&#128465;</button>` : ''}
             </div>
@@ -1570,7 +1701,8 @@ function openAccountsModal() {
     <div class="form-group"><label class="form-label">Role</label>
       <select class="form-input" id="new-acct-role">
         <option value="member">Member</option>
-        <option value="admin">Admin</option>
+        ${isOwner() ? `<option value="collaborator">Collaborator</option>
+        <option value="admin">Administrator</option>` : ''}
       </select></div>
     <button class="form-btn form-btn-primary" id="add-acct-btn">+ Create Account</button>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px">The member signs in with their email and this password, then changes it in Settings.</p>
@@ -1608,6 +1740,22 @@ function openAccountsModal() {
 
     document.querySelectorAll('[data-edit-acct]').forEach(btn => {
       btn.addEventListener('click', () => openEditAccountModal(btn.dataset.editAcct));
+    });
+    document.querySelectorAll('[data-approve-acct]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const u = getUsers()[btn.dataset.approveAcct];
+        if (!u || !u.uid) { showToast('That account has no sign-in record.', 'error'); return; }
+        btn.disabled = true;
+        try {
+          await usersRef.child(u.uid).update({ role: 'member' });
+          await loadProfiles();
+          showToast(`${u.displayName || u.username} can now use the app.`, 'info');
+          openAccountsModal();
+        } catch {
+          btn.disabled = false;
+          showToast('Could not approve — permission required.', 'error');
+        }
+      });
     });
     document.querySelectorAll('[data-del-acct]').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -1687,6 +1835,68 @@ async function createAuthUserAsAdmin(email, password) {
   }
 }
 
+const ROLE_LABELS = {
+  owner:        'Owner — everything, including assigning roles',
+  admin:        'Administrator — everything except roles',
+  collaborator: 'Collaborator — only the areas ticked below',
+  member:       'Member',
+  pending:      'Pending — waiting for approval'
+};
+
+function countOwners() {
+  return Object.values(profilesByUid || {}).filter(p => p && p.role === 'owner').length;
+}
+
+// Only an owner sees this, and never for their own account: nobody may change
+// their own role, which is what stops the last owner locking the church out.
+function roleEditor(u) {
+  if (!isOwner()) {
+    return `<div class="form-group"><label class="form-label">Role</label>
+      <input class="form-input" value="${esc(ROLE_LABELS[u.role] || 'Member')}" disabled style="opacity:.55" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Only an owner can change roles.</p></div>`;
+  }
+  if (u.uid === currentUser.uid) {
+    return `<div class="form-group"><label class="form-label">Role</label>
+      <input class="form-input" value="${esc(ROLE_LABELS[u.role] || '')}" disabled style="opacity:.55" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">This is you. Another owner would have to change your role.</p></div>`;
+  }
+  if (u.role === 'owner') {
+    return `<div class="form-group"><label class="form-label">Role</label>
+      <input class="form-input" value="${esc(ROLE_LABELS.owner)}" disabled style="opacity:.55" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">An owner's account can only be changed by themselves.</p></div>`;
+  }
+  const opts = ROLES.filter(r => r !== 'pending' || u.role === 'pending')
+    .map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${esc(ROLE_LABELS[r])}</option>`).join('');
+  const perms = (u.perms || {});
+  return `
+    <div class="form-group"><label class="form-label">Role</label>
+      <select class="form-input" id="ea-role">${opts}</select></div>
+    <div class="form-group" id="ea-perms" style="${u.role === 'collaborator' ? '' : 'display:none'}">
+      <label class="form-label">What they can edit</label>
+      ${PERMS.map(p => `
+        <label class="booking-check"><input type="checkbox" class="ea-perm" data-perm="${p.key}" ${perms[p.key] ? 'checked' : ''} />
+          <span>${esc(p.label)}</span></label>`).join('')}
+      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">
+        Collaborators never see prayer requests, Sorei-Saishi records, meeting bookings or members' contact details.
+      </p>
+    </div>`;
+}
+
+function bindRoleEditor(u) {
+  const sel = document.getElementById('ea-role');
+  if (!sel) return;
+  sel.addEventListener('change', () => {
+    const box = document.getElementById('ea-perms');
+    if (box) box.style.display = sel.value === 'collaborator' ? '' : 'none';
+  });
+}
+
+function readPerms() {
+  const out = {};
+  document.querySelectorAll('.ea-perm').forEach(el => { if (el.checked) out[el.dataset.perm] = true; });
+  return Object.keys(out).length ? out : null;
+}
+
 function openEditAccountModal(username) {
   const users = getUsers();
   const u = users[username];
@@ -1696,11 +1906,7 @@ function openEditAccountModal(username) {
       <input class="form-input" value="${esc(u.email || '—')}" disabled style="opacity:.55" /></div>
     <div class="form-group"><label class="form-label">Display Name</label>
       <input class="form-input" id="ea-display" value="${esc(u.displayName || '')}" /></div>
-    <div class="form-group"><label class="form-label">Role</label>
-      <select class="form-input" id="ea-role">
-        <option value="member" ${u.role === 'member' ? 'selected' : ''}>Member</option>
-        <option value="admin"  ${u.role === 'admin'  ? 'selected' : ''}>Admin</option>
-      </select></div>
+    ${roleEditor(u)}
     <button class="form-btn form-btn-primary" id="ea-save">Save Changes</button>
     <div class="form-group" style="margin-top:18px">
       <label class="form-label">Password</label>
@@ -1725,17 +1931,30 @@ function openEditAccountModal(username) {
         btn.disabled = false;
       }
     });
+    bindRoleEditor(u);
     document.getElementById('ea-save').addEventListener('click', async () => {
       const displayName = document.getElementById('ea-display').value.trim();
-      const role        = document.getElementById('ea-role').value;
       if (!u.uid) { showToast('That account has no linked sign-in record.', 'error'); return; }
+      const patch = { displayName: displayName || username };
+      const roleEl = document.getElementById('ea-role');
+      if (roleEl && isOwner() && u.uid !== currentUser.uid) {
+        const role = roleEl.value;
+        if (role === 'owner' && u.role !== 'owner' && countOwners() >= MAX_OWNERS) {
+          showToast(`There can be at most ${MAX_OWNERS} owners. Step one down first.`, 'error');
+          return;
+        }
+        patch.role = role;
+        patch.perms = role === 'collaborator' ? readPerms() : null;
+      }
       try {
-        await usersRef.child(u.uid).update({ displayName: displayName || username, role });
+        await usersRef.child(u.uid).update(patch);
         await loadProfiles();
         showToast('Account updated!', 'info');
         openAccountsModal();
-      } catch {
-        showToast('Could not save — admin permission required.', 'error');
+      } catch (err) {
+        showToast(err.code === 'PERMISSION_DENIED'
+          ? 'Only an owner can change roles.'
+          : 'Could not save — permission required.', 'error');
       }
     });
     document.getElementById('ea-back').addEventListener('click', openAccountsModal);
@@ -1898,7 +2117,7 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
     const applyAll = () => {
       if (!appData.liveEvents) appData.liveEvents = {};
       PLATFORMS.forEach(p => { appData.liveEvents[p.key] = collect(p); });
-      saveData();
+      saveSection('liveEvents');
     };
 
     // Switching a platform takes effect immediately. It used to do nothing at
@@ -2119,7 +2338,7 @@ function bindJohreiForm() {
       if (rec) items[i].recurrence = rec; else delete items[i].recurrence;
     });
     appData.johreiSessions = items;
-    saveData(); closeModal();
+    saveSection('johreiSessions'); closeModal();
   });
 }
 
@@ -2210,7 +2429,7 @@ function bindServicesForm() {
       if (rec) appData.services[i].recurrence = rec;
       else     delete appData.services[i].recurrence;
     });
-    saveData(); closeModal();
+    saveSection('services'); closeModal();
   });
 }
 
@@ -2652,7 +2871,7 @@ document.getElementById('edit-location-btn').addEventListener('click', () => {
       appData.location.mapsUrl = document.getElementById('f-maps').value.trim();
       appData.contact.phone    = document.getElementById('f-phone').value.trim();
       appData.contact.email    = document.getElementById('f-email').value.trim();
-      saveData(); closeModal();
+      saveSection('location', 'contact'); closeModal();
     });
   });
 });
@@ -2684,7 +2903,7 @@ function renderEvents() {
     <div class="event-card">
       <div class="event-card-top">
         <div><div class="event-date">${esc(e.date)}</div><div class="event-title">${esc(e.title)}</div></div>
-        <div class="card-actions admin-only">
+        <div class="card-actions perm-events">
           <button class="card-action-btn" data-action="edit-event" data-id="${e.id}">&#9998;</button>
           <button class="card-action-btn delete" data-action="del-event" data-id="${e.id}">&#128465;</button>
         </div>
@@ -2729,7 +2948,7 @@ function openEventModal(id) {
         appData.events.push({ id: nextId(appData.events), date, title, desc, tag,
                               createdAt: new Date().toISOString() });
       }
-      saveData(); closeModal();
+      saveSection('events'); closeModal();
     });
     const delBtn = document.getElementById('del-event-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteEvent(id); closeModal(); });
@@ -2739,7 +2958,7 @@ function openEventModal(id) {
 function deleteEvent(id) {
   if (!confirm('Delete this event?')) return;
   appData.events = appData.events.filter(e => e.id !== id);
-  saveData();
+  saveSection('events');
 }
 
 // ── DIRECTORY ──
@@ -2808,7 +3027,7 @@ function openMemberModal(id) {
       } else {
         appData.members.push({ id: nextId(appData.members), name, role, phone, email });
       }
-      saveData(); renderDirectory(document.getElementById('directory-search').value); closeModal();
+      saveSection('members'); renderDirectory(document.getElementById('directory-search').value); closeModal();
     });
     const delBtn = document.getElementById('del-member-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteMember(id); closeModal(); });
@@ -2818,7 +3037,7 @@ function openMemberModal(id) {
 function deleteMember(id) {
   if (!confirm('Remove this member?')) return;
   appData.members = appData.members.filter(m => m.id !== id);
-  saveData(); renderDirectory(document.getElementById('directory-search').value);
+  saveSection('members'); renderDirectory(document.getElementById('directory-search').value);
 }
 
 // ── MEDIA ──
@@ -2855,7 +3074,7 @@ function renderMedia() {
           <a class="media-btn${isFB ? ' fb-btn' : ''}" href="${esc(m.url)}" target="_blank">
             &#9654; Watch${isFB ? ' on Facebook' : ''}
           </a>
-          <div class="card-actions admin-only">
+          <div class="card-actions perm-media">
             <button class="card-action-btn" data-action="edit-media" data-id="${m.id}">&#9998;</button>
             <button class="card-action-btn delete" data-action="del-media" data-id="${m.id}">&#128465;</button>
           </div>
@@ -2914,7 +3133,7 @@ function openMediaModal(id) {
       } else {
         appData.media.push({ id: nextId(appData.media), source, series, title, date, pastor, url });
       }
-      saveData(); closeModal();
+      saveSection('media'); closeModal();
     });
     const delBtn = document.getElementById('del-media-btn');
     if (delBtn) delBtn.addEventListener('click', () => { deleteMedia(id); closeModal(); });
@@ -2924,7 +3143,7 @@ function openMediaModal(id) {
 function deleteMedia(id) {
   if (!confirm('Delete this recording?')) return;
   appData.media = appData.media.filter(m => m.id !== id);
-  saveData();
+  saveSection('media');
 }
 
 // ── DONATIONS ──
@@ -3006,7 +3225,7 @@ function openEditDonationsModal() {
       appData.donations.websiteUrl = document.getElementById('don-url').value.trim() || DEFAULT_DATA.donations.websiteUrl;
       appData.donations.zelle      = { enabled: document.getElementById('don-zelle-on').checked, info: document.getElementById('don-zelle-info').value.trim(), note: document.getElementById('don-zelle-note').value.trim() };
       appData.donations.venmo      = { enabled: document.getElementById('don-venmo-on').checked, handle: document.getElementById('don-venmo-handle').value.trim().replace(/^@+/, ''), note: document.getElementById('don-venmo-note').value.trim() };
-      saveData(); closeModal();
+      saveSection('donations'); closeModal();
     });
   });
 }
@@ -3275,7 +3494,7 @@ function openPrayerFormEditor(id) {
       } else {
         appData.prayerForms.push({ id: nextId(appData.prayerForms), type: 'custom', title, description: desc, active, fixed: false });
       }
-      saveData(); closeModal();
+      saveSection('prayerForms'); closeModal();
     });
   });
 }
@@ -3283,7 +3502,7 @@ function openPrayerFormEditor(id) {
 function deletePrayerForm(id) {
   if (!confirm('Delete this prayer form? Existing submissions in the inbox are kept.')) return;
   appData.prayerForms = ensureArray(appData.prayerForms, DEFAULT_DATA.prayerForms).filter(f => f.id !== id);
-  saveData();
+  saveSection('prayerForms');
 }
 
 // ── SOREI-SAISHI ──
@@ -3825,7 +4044,7 @@ function openSoreiRulesModal() {
   `, () => {
     document.getElementById('save-rules-btn').addEventListener('click', () => {
       appData.soreiRules = document.getElementById('sorei-rules-text').value.trim();
-      saveData(); closeModal();
+      saveSection('soreiRules'); closeModal();
     });
   });
 }
@@ -4121,7 +4340,7 @@ async function saveProfile() {
 // Standard VAPID push: no Firebase Cloud Messaging and no paid plan. The
 // public key is safe to ship; the matching private key lives in a GitHub
 // secret and is only used by the scheduled sender workflow.
-const NOTIF_KEYS = ['dailyword', 'events', 'live', 'prayer', 'sorei', 'services', 'oneonone'];
+const NOTIF_KEYS = ['dailyword', 'announcements', 'events', 'live', 'prayer', 'sorei', 'services', 'oneonone'];
 
 // Filled in from the running service worker, so it always reflects the code
 // actually on the device rather than a constant that drifts out of date.

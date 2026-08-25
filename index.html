@@ -107,6 +107,18 @@
     </div>
   </div>
 
+  <!-- Shown to a new account until the minister lets them in -->
+  <div class="announce-overlay hidden" id="pending-overlay">
+    <div class="announce-card" style="text-align:center">
+      <div class="announce-badge">Almost there</div>
+      <h3 class="announce-title">Waiting for approval</h3>
+      <div class="announce-text" style="text-align:left">Thank you for joining. Your minister needs to approve your account before you can see the church's information.
+
+You will not need to sign in again — this page will open by itself once you are approved.</div>
+      <button class="announce-ok" id="pending-signout-btn" style="background:rgba(32,30,29,.1);color:var(--text)">Sign out</button>
+    </div>
+  </div>
+
   <!-- Announcement popup: stays until the member closes it -->
   <div class="announce-overlay hidden" id="announce-overlay">
     <div class="announce-card">
@@ -150,15 +162,15 @@
     <!-- HOME TAB -->
     <section class="tab-content active" id="tab-home">
 
-      <div class="section-header admin-only" style="margin-top:4px">
+      <div class="section-header perm-announce" style="margin-top:4px">
         <h3 class="section-title">Announcement</h3>
         <button class="section-edit-btn" id="edit-announce-btn">Edit</button>
       </div>
-      <div id="announce-admin-status" class="admin-only"></div>
+      <div id="announce-admin-status" class="perm-announce"></div>
 
       <div class="section-header" style="margin-top:4px">
         <h3 class="section-title">Daily Inspiration</h3>
-        <button class="section-edit-btn admin-only" id="schedule-word-btn">Schedule</button>
+        <button class="section-edit-btn perm-dailyword" id="schedule-word-btn">Schedule</button>
       </div>
       <div id="daily-word-container"></div>
 
@@ -169,13 +181,13 @@
 
       <div class="section-header">
         <h3 class="section-title">Live Events</h3>
-        <button class="section-edit-btn admin-only" id="edit-live-btn">Edit</button>
+        <button class="section-edit-btn perm-live" id="edit-live-btn">Edit</button>
       </div>
       <div id="live-events-list" class="live-events-grid"></div>
 
       <div class="section-header">
         <h3 class="section-title">Service Times</h3>
-        <button class="section-edit-btn admin-only" id="edit-services-btn">Edit</button>
+        <button class="section-edit-btn perm-services" id="edit-services-btn">Edit</button>
       </div>
       <div class="card-list" id="services-list"></div>
 
@@ -195,7 +207,7 @@
     <section class="tab-content" id="tab-events">
       <div class="section-header">
         <h3 class="section-title">Upcoming Events</h3>
-        <button class="section-edit-btn admin-only" id="add-event-btn">+ Add</button>
+        <button class="section-edit-btn perm-events" id="add-event-btn">+ Add</button>
       </div>
       <div id="events-list" class="card-list"></div>
     </section>
@@ -222,7 +234,7 @@
     <section class="tab-content" id="tab-media">
       <div class="section-header">
         <h3 class="section-title">Services &amp; Teachings</h3>
-        <button class="section-edit-btn admin-only" id="add-media-btn">+ Add</button>
+        <button class="section-edit-btn perm-media" id="add-media-btn">+ Add</button>
       </div>
       <div id="media-list" class="card-list"></div>
     </section>
@@ -304,7 +316,7 @@
 
       <div class="section-header">
         <h3 class="section-title">Session Times</h3>
-        <button class="section-edit-btn admin-only" id="edit-johrei-btn">Edit</button>
+        <button class="section-edit-btn perm-services" id="edit-johrei-btn">Edit</button>
       </div>
       <div class="card-list" id="johrei-schedule-list"></div>
 
@@ -447,6 +459,17 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="settings-toggle-row">
+          <div class="toggle-info">
+            <div class="toggle-title">Announcements</div>
+            <div class="toggle-sub">Urgent news from your minister</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="notif-announcements" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
         <div class="settings-toggle-row">
           <div class="toggle-info">
             <div class="toggle-title">Upcoming Events</div>
