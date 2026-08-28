@@ -3469,7 +3469,12 @@ function openPrayerInboxModal() {
     });
 }
 
+// Held so the print buttons can reach the exact record they belong to,
+// rather than re-deriving it from the rendered text.
+let printable = [];
+
 function renderPrayerInbox(all) {
+  printable = [];
   const requests = all.slice()
     .sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
 
@@ -3491,6 +3496,7 @@ function renderPrayerInbox(all) {
   for (const [title, items] of Object.entries(groups)) {
     html += `<p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin:16px 0 8px">${esc(title)} (${items.length})</p>`;
     html += items.map(req => {
+      const idx = printable.push(req) - 1;
       const d = new Date(req.submittedAt);
       return `<div class="prayer-inbox-item">
         <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px">
@@ -3499,10 +3505,19 @@ function renderPrayerInbox(all) {
         </div>
         ${req.ancestorNames ? `<div style="font-size:12px;color:var(--purple-light);margin-bottom:4px">&#9729;&#65039; ${esc(req.ancestorNames)}</div>` : ''}
         <div class="prayer-inbox-text">${esc(req.prayerText)}</div>
+        <button class="form-btn prayer-print-btn" data-print-prayer="${idx}"
+                style="margin-top:10px;padding:8px 14px;font-size:13px;width:auto;background:var(--gold-light);color:var(--purple);border:1px solid var(--purple)">
+          &#128424; Print / Save / Share</button>
       </div>`;
     }).join('');
   }
   document.getElementById('modal-body').innerHTML = html;
+  document.querySelectorAll('[data-print-prayer]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const req = printable[parseInt(btn.dataset.printPrayer, 10)];
+      if (req) printPrayerRequest(req);
+    });
+  });
 }
 
 function openPrayerFormEditor(id) {
@@ -4009,6 +4024,82 @@ function openServiceRequestModal(entryId, ancId) {
         });
     });
   });
+}
+
+// A prayer request as a letter-size sheet: logo centred, the church name,
+// the request itself, and the member's name with the date at the foot.
+// Printing on a phone is also how you save a PDF or share it, so this one
+// button covers all three.
+function printPrayerRequest(req) {
+  const fmt = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleDateString('en-US',
+      { year: 'numeric', month: 'long', day: 'numeric' });
+  };
+  // The new window has no address of its own, so a relative path would not
+  // resolve — make the logo absolute against the app.
+  const logo = new URL('logo.svg', window.location.href).href;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Allow pop-ups for this site to print.', 'error'); return; }
+  win.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>${esc(req.formTitle || 'Prayer Request')} — ${esc(req.memberName || '')}</title>
+<style>
+  @page { size: letter; margin: 1in; }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a;
+         line-height: 1.75; margin: 0; padding: 48px 56px; }
+  .sheet { max-width: 6.5in; margin: 0 auto; min-height: 8in;
+           display: flex; flex-direction: column; }
+  header { text-align: center; margin-bottom: 40px; }
+  header img { width: 96px; height: 96px; object-fit: contain; display: block; margin: 0 auto 14px; }
+  .church { font-size: 19px; font-weight: 700; letter-spacing: .02em; color: #8c491a; }
+  .rule { border: 0; border-top: 1.5px solid #c67139; margin: 22px auto 0; width: 72px; }
+  h1 { font-size: 17px; font-weight: 700; text-transform: uppercase;
+       letter-spacing: .12em; text-align: center; margin: 0 0 28px; color: #1a1a1a; }
+  .meta { font-size: 14px; margin-bottom: 22px; }
+  .meta span { color: #555; }
+  .content { font-size: 15px; white-space: pre-wrap; flex: 1; }
+  footer { margin-top: 56px; padding-top: 14px; border-top: 1px solid #cfcfcf;
+           display: flex; justify-content: space-between; align-items: flex-end;
+           font-size: 14px; }
+  footer .who { font-weight: 700; }
+  footer .when { color: #555; }
+  @media print { body { padding: 0; } .sheet { min-height: 9in; } }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <header>
+      <img src="${esc(logo)}" alt="" />
+      <div class="church">World Messianic Church of America</div>
+      <hr class="rule" />
+    </header>
+
+    <h1>${esc(req.formTitle || 'Prayer Request')}</h1>
+
+    ${req.ancestorNames ? `<div class="meta"><span>Ancestor(s):</span> ${esc(req.ancestorNames)}</div>` : ''}
+
+    <div class="content">${esc(req.prayerText || '')}</div>
+
+    <footer>
+      <div class="who">${esc(req.memberName || '')}</div>
+      <div class="when">${esc(fmt(req.submittedAt))}</div>
+    </footer>
+  </div>
+<script>
+  // Wait for the logo so it is never missing from the printed sheet.
+  var img = document.images[0];
+  function go() { window.focus(); window.print(); }
+  if (!img || img.complete) setTimeout(go, 120);
+  else { img.onload = go; img.onerror = go; }
+<\/script>
+</body>
+</html>`);
+  win.document.close();
 }
 
 function printShireiSaishiLetter(entry, anc, deathDate) {
