@@ -107,6 +107,17 @@
     </div>
   </div>
 
+  <!-- Printable sheet. Shown inside the app rather than a bare new window:
+       that window had no address bar and no close button, so once the print
+       dialog was dismissed there was no way back out of it. -->
+  <div class="print-overlay hidden" id="print-overlay">
+    <div class="print-bar">
+      <button class="print-bar-btn" id="print-close-btn">&#8592; Close</button>
+      <button class="print-bar-btn primary" id="print-go-btn">&#128424; Print / Save / Share</button>
+    </div>
+    <div class="print-scroll"><div class="print-sheet" id="print-sheet"></div></div>
+  </div>
+
   <!-- Shown to a new account until the minister lets them in -->
   <div class="announce-overlay hidden" id="pending-overlay">
     <div class="announce-card" style="text-align:center">

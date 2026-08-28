@@ -4026,145 +4026,101 @@ function openServiceRequestModal(entryId, ancId) {
   });
 }
 
-// A prayer request as a letter-size sheet: logo centred, the church name,
-// the request itself, and the member's name with the date at the foot.
-// Printing on a phone is also how you save a PDF or share it, so this one
-// button covers all three.
-function printPrayerRequest(req) {
-  const fmt = iso => {
-    const d = new Date(iso);
-    return isNaN(d) ? '' : d.toLocaleDateString('en-US',
-      { year: 'numeric', month: 'long', day: 'numeric' });
-  };
-  // The new window has no address of its own, so a relative path would not
-  // resolve — make the logo absolute against the app.
-  const logo = new URL('logo.svg', window.location.href).href;
+// Show a printable sheet inside the app. It used to open in a new window with
+// no address bar and no close button, so once the print dialog was dismissed
+// the member was stranded on a page they could not leave.
+function openPrintSheet(innerHtml) {
+  const sheet = document.getElementById('print-sheet');
+  sheet.innerHTML = innerHtml;
+  document.getElementById('print-overlay').classList.remove('hidden');
+  document.querySelector('.print-scroll').scrollTop = 0;
+}
 
-  const win = window.open('', '_blank');
-  if (!win) { showToast('Allow pop-ups for this site to print.', 'error'); return; }
-  win.document.write(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<title>${esc(req.formTitle || 'Prayer Request')} — ${esc(req.memberName || '')}</title>
-<style>
-  @page { size: letter; margin: 1in; }
-  * { box-sizing: border-box; }
-  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a;
-         line-height: 1.75; margin: 0; padding: 48px 56px; }
-  .sheet { max-width: 6.5in; margin: 0 auto; min-height: 8in;
-           display: flex; flex-direction: column; }
-  header { text-align: center; margin-bottom: 40px; }
-  header img { width: 96px; height: 96px; object-fit: contain; display: block; margin: 0 auto 14px; }
-  .church { font-size: 19px; font-weight: 700; letter-spacing: .02em; color: #8c491a; }
-  .rule { border: 0; border-top: 1.5px solid #c67139; margin: 22px auto 0; width: 72px; }
-  h1 { font-size: 17px; font-weight: 700; text-transform: uppercase;
-       letter-spacing: .12em; text-align: center; margin: 0 0 28px; color: #1a1a1a; }
-  .meta { font-size: 14px; margin-bottom: 22px; }
-  .meta span { color: #555; }
-  .content { font-size: 15px; white-space: pre-wrap; flex: 1; }
-  footer { margin-top: 56px; padding-top: 14px; border-top: 1px solid #cfcfcf;
-           display: flex; justify-content: space-between; align-items: flex-end;
-           font-size: 14px; }
-  footer .who { font-weight: 700; }
-  footer .when { color: #555; }
-  @media print { body { padding: 0; } .sheet { min-height: 9in; } }
-</style>
-</head>
-<body>
-  <div class="sheet">
-    <header>
-      <img src="${esc(logo)}" alt="" />
+function closePrintSheet() {
+  document.getElementById('print-overlay').classList.add('hidden');
+  document.getElementById('print-sheet').innerHTML = '';
+}
+
+document.getElementById('print-close-btn').addEventListener('click', closePrintSheet);
+document.getElementById('print-go-btn').addEventListener('click', () => {
+  // Give the logo a moment if it is still loading, so it is never missing from
+  // the printed page.
+  const img = document.querySelector('#print-sheet img');
+  const go  = () => window.print();
+  if (!img || img.complete) go();
+  else { img.onload = go; img.onerror = go; setTimeout(go, 1500); }
+});
+
+// The church's letterhead, shared by every printed sheet.
+function sheetHeader() {
+  return `<header>
+      <img src="logo.svg" alt="" />
       <div class="church">World Messianic Church of America</div>
       <hr class="rule" />
-    </header>
+    </header>`;
+}
 
+const longDate = iso => {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString('en-US',
+    { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+// A prayer request: logo, church name, the request, and the member's name
+// with the date at the foot.
+function printPrayerRequest(req) {
+  openPrintSheet(`
+    ${sheetHeader()}
     <h1>${esc(req.formTitle || 'Prayer Request')}</h1>
-
     ${req.ancestorNames ? `<div class="meta"><span>Ancestor(s):</span> ${esc(req.ancestorNames)}</div>` : ''}
-
     <div class="content">${esc(req.prayerText || '')}</div>
-
     <footer>
       <div class="who">${esc(req.memberName || '')}</div>
-      <div class="when">${esc(fmt(req.submittedAt))}</div>
-    </footer>
-  </div>
-<script>
-  // Wait for the logo so it is never missing from the printed sheet.
-  var img = document.images[0];
-  function go() { window.focus(); window.print(); }
-  if (!img || img.complete) setTimeout(go, 120);
-  else { img.onload = go; img.onerror = go; }
-<\/script>
-</body>
-</html>`);
-  win.document.close();
+      <div class="when">${esc(longDate(req.submittedAt))}</div>
+    </footer>`);
 }
 
 function printShireiSaishiLetter(entry, anc, deathDate) {
-  const schedDates = [10, 20, 30, 40, 50].map(n => `<tr><td style="padding:8px 12px;font-weight:600">Day ${n}</td><td style="padding:8px 12px">${addDays(deathDate, n)}</td></tr>`).join('');
+  const schedDates = [10, 20, 30, 40, 50].map(n =>
+    `<tr><td>Day ${n}</td><td>${addDays(deathDate, n)}</td></tr>`).join('');
+  const deathDisplay = longDate(deathDate + 'T00:00:00');
+  const today = longDate(new Date());
 
-  const deathDisplay = (() => {
-    const d = new Date(deathDate + 'T00:00:00');
-    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    return DAYS[d.getDay()] + ', ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
-  })();
+  openPrintSheet(`
+    ${sheetHeader()}
+    <h1>Shinrei-Saishi Service Schedule</h1>
 
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    <div class="meta"><span>Date:</span> ${esc(today)}</div>
+    <div class="content">Dear <strong>${esc(entry.memberName)}</strong>,
 
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<title>Shinrei-Saishi Service Letter</title>
-<style>
-  body { font-family: Georgia, serif; max-width: 720px; margin: 40px auto; padding: 0 24px; color: #1a1a2e; line-height: 1.7; }
-  h1 { color: #4a1c6e; font-size: 22px; margin-bottom: 4px; }
-  .subtitle { color: #6b3fa0; font-size: 14px; letter-spacing: 0.05em; margin-bottom: 32px; }
-  .section-title { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #4a1c6e; margin: 24px 0 8px; border-bottom: 2px solid #d4a843; padding-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-  tr:nth-child(odd) td { background: #f5f0ff; }
-  td { border: 1px solid #e0d8ed; font-size: 14px; }
-  .note { background: #fff7ed; border-left: 4px solid #d4a843; padding: 14px 16px; border-radius: 4px; font-size: 14px; margin-top: 24px; }
-  .footer { margin-top: 40px; font-size: 12px; color: #6b6b80; border-top: 1px solid #e0d8ed; padding-top: 12px; }
-  @media print { body { margin: 24px auto; } }
-</style>
-</head>
-<body>
-<h1>Miroku LA Church</h1>
-<div class="subtitle">World Messianity — Los Angeles</div>
+We have received your Shinrei-Saishi service request and wish to express our sincere condolences during this time of transition. Below is the schedule for the 50-day memorial services for your ancestor.</div>
 
-<p>Date: ${today}</p>
-<p>Dear <strong>${esc(entry.memberName)}</strong>,</p>
-<p>We have received your Shinrei-Saishi service request and wish to express our sincere condolences during this time of transition. Please find below the schedule for the 50-day memorial services for your ancestor.</p>
+    <div class="sheet-section">Ancestor</div>
+    <div class="meta">
+      <span>Name:</span> ${esc(anc.name)}<br />
+      <span>Relation:</span> ${esc(anc.relation || 'Ancestor')}<br />
+      <span>Date of transition:</span> ${esc(deathDisplay)}
+    </div>
 
-<div class="section-title">Ancestor Information</div>
-<p><strong>Name:</strong> ${esc(anc.name)}<br />
-<strong>Relation:</strong> ${esc(anc.relation || 'Ancestor')}<br />
-<strong>Date of Transition:</strong> ${deathDisplay}</p>
+    <div class="sheet-section">50-Day Service Schedule</div>
+    <table class="sheet-table">
+      <thead><tr><td>Service</td><td>Scheduled date</td></tr></thead>
+      <tbody>${schedDates}</tbody>
+    </table>
 
-<div class="section-title">50-Day Service Schedule</div>
-<p style="font-size:13px;color:#6b6b80;margin-bottom:8px">Services should ideally be performed on or near each of the following dates:</p>
-<table>
-  <thead><tr style="background:#4a1c6e;color:#fff"><td style="padding:8px 12px">Service</td><td style="padding:8px 12px">Scheduled Date</td></tr></thead>
-  <tbody>${schedDates}</tbody>
-</table>
+    <div class="sheet-note"><strong>Please contact your minister</strong> to arrange the date and time
+    for each service. The 50-day Shinrei-Saishi period is a sacred time of spiritual transition, and
+    your participation and prayers are essential.</div>
 
-<div class="note">
-  <strong>Important:</strong> Please contact your minister as soon as possible to arrange the dates and times for each service. The 50-day Shinrei-Saishi period is a sacred time of spiritual transition. Your participation and prayers are essential.
-</div>
+    <div class="content" style="min-height:0;margin-top:22px">May your ancestor rest in the Light of God, and may your family find peace and comfort during this time.
 
-<p style="margin-top:24px">May your ancestor rest in the Light of God, and may your family find peace and comfort during this time.</p>
-<p>In faith and service,<br /><strong>Miroku LA Church</strong><br />World Messianity — Los Angeles</p>
+In faith and service,
+<strong>Miroku LA Church</strong></div>
 
-<div class="footer">Miroku LA Church &bull; worldmessianic.org &bull; This letter was generated on ${today}</div>
-</body>
-</html>`);
-  win.document.close();
-  setTimeout(() => win.print(), 600);
+    <footer>
+      <div class="who">${esc(entry.memberName)}</div>
+      <div class="when">${esc(today)}</div>
+    </footer>`);
 }
 
 function openSoreiRulesModal() {
