@@ -1921,9 +1921,23 @@ body:not(.is-owner) .owner-only { display: none; }
   }
   #print-overlay .print-bar { display: none !important; }
   .print-scroll { overflow: visible !important; padding: 0 !important; }
+
+  /* One page for anything of normal length.
+     A 4.5in minimum on the content used to push the name and date onto a
+     second sheet even when the prayer was one word. On paper that layout came
+     to roughly 7.5in, which fits the 9in a letter page has between one-inch
+     margins — but Safari prints its own address and page number inside that
+     area, leaving noticeably less, and the footer fell off the bottom.
+     So the sheet is a column with a deliberately modest floor: the content
+     stretches to fill it, the footer sits at the foot, and the whole thing
+     stays far enough inside any browser's printable area to be safe. A long
+     prayer still flows onto a second page, which is correct. */
   .print-sheet {
     box-shadow: none !important; max-width: none !important;
     padding: 0 !important; margin: 0 !important;
+    display: flex; flex-direction: column; min-height: 6in;
   }
-  .print-sheet .content { min-height: 4.5in; }
+  .print-sheet .content { flex: 1 1 auto; min-height: 0 !important; }
+  .print-sheet footer { margin-top: 24px; break-inside: avoid; page-break-inside: avoid; }
+  .print-sheet header, .print-sheet h1 { break-after: avoid; page-break-after: avoid; }
 }
