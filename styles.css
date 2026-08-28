@@ -307,6 +307,7 @@ body:not(.can-live)      .perm-live      { display: none; }
 body:not(.can-events)    .perm-events    { display: none; }
 body:not(.can-media)     .perm-media     { display: none; }
 body:not(.can-announce)  .perm-announce  { display: none; }
+body:not(.can-sorei)     .perm-sorei     { display: none; }
 body.can-events .card-actions.perm-events,
 body.can-media  .card-actions.perm-media { display: flex; }
 body:not(.is-owner) .owner-only { display: none; }

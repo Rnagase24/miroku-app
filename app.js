@@ -124,7 +124,10 @@ async function loadProfiles(uid) {
     const mine = await usersRef.child(uid).once('value');
     profilesByUid = mine.exists() ? { [uid]: mine.val() } : {};
     rebuildUsersCache();
-    if (((mine.val() || {}).role) !== 'admin') return usersCache;
+    // Owner as well as administrator — checking for 'admin' alone left an
+    // owner able to see only their own account in Manage Accounts.
+    const r = (mine.val() || {}).role;
+    if (r !== 'owner' && r !== 'admin') return usersCache;
   }
   const snap = await usersRef.once('value');
   profilesByUid = snap.exists() ? snap.val() : {};
@@ -197,23 +200,55 @@ let currentUser = null;
 const ROLES = ['owner', 'admin', 'collaborator', 'member', 'pending'];
 const MAX_OWNERS = 2;
 
-// The content areas a collaborator can be given. Each maps to one section of
-// church/data, and the rules grant exactly that section — the interface hiding
-// a button is not a permission.
+// The areas a helper can be given. Each is granted separately by the rules —
+// the interface hiding a button is not a permission.
 const PERMS = [
-  { key: 'dailyword', label: 'Daily Inspiration',     sections: ['messages'] },
-  { key: 'services',  label: 'Service & Johrei times', sections: ['services', 'johreiSessions'] },
-  { key: 'live',      label: 'Live streaming',        sections: ['liveEvents'] },
-  { key: 'events',    label: 'Events',                sections: ['events'] },
-  { key: 'media',     label: 'Media',                 sections: ['media', 'ytVideos'] },
-  { key: 'announce',  label: 'Announcements',         sections: ['announcement'] }
+  { key: 'dailyword', label: 'Daily Inspiration' },
+  { key: 'sorei',     label: 'Sorei-Saishi' },
+  { key: 'events',    label: 'Events' },
+  { key: 'live',      label: 'Live streaming' },
+  { key: 'services',  label: 'Service & Johrei times' },
+  { key: 'media',     label: 'Media' },
+  { key: 'announce',  label: 'Announcements' }
 ];
+
+// The helper roles as they are actually chosen: one name, one job. The
+// permissions behind them stay separate so a role can be widened later without
+// anyone having to re-learn how it works.
+const HELPERS = [
+  { id: 'dailyword', label: 'Helper · Daily Inspiration',
+    blurb: 'Writes and schedules the Daily Inspiration.',
+    perms: { dailyword: true } },
+  { id: 'sorei',     label: 'Helper · Sorei-Saishi',
+    blurb: 'Manages ancestor enrolments and service requests. Sees family records and members\u2019 contact details.',
+    perms: { sorei: true } },
+  { id: 'events',    label: 'Helper · Events & Live Stream',
+    blurb: 'Posts events and switches the live stream on and off.',
+    perms: { events: true, live: true } }
+];
+
+// Which helper role a set of permissions represents.
+function helperIdOf(perms) {
+  const on = Object.keys(perms || {}).filter(k => perms[k]).sort().join(',');
+  const match = HELPERS.find(h => Object.keys(h.perms).sort().join(',') === on);
+  return match ? match.id : null;
+}
+
+function roleLabelFor(u) {
+  if (u.role === 'collaborator') {
+    const h = HELPERS.find(x => x.id === helperIdOf(u.perms));
+    return h ? h.label : 'Helper · custom';
+  }
+  return { owner: 'Owner', admin: 'Administrator', member: 'Member', pending: 'Pending approval' }[u.role] || 'Member';
+}
 
 function roleOf()   { return (currentUser && currentUser.role) || 'member'; }
 function isOwner()  { return roleOf() === 'owner'; }
 // Everything the church runs on: content, member records, the private inboxes.
 function isManager(){ return isOwner() || roleOf() === 'admin'; }
 function isPending(){ return roleOf() === 'pending'; }
+// Sorei-Saishi: the managers, plus a helper given that job.
+function canSorei(){ return can('sorei'); }
 
 // May this person edit a given content area?
 function can(perm) {
@@ -392,9 +427,10 @@ function applyRoleToInterface() {
   body.classList.toggle('is-owner',   isOwner());
   body.classList.toggle('is-admin',   isManager());   // legacy hook
   for (const p of PERMS) body.classList.toggle('can-' + p.key, can(p.key));
+  body.classList.toggle('can-sorei', canSorei());
   const badge = document.getElementById('admin-badge');
   if (badge) {
-    const label = { owner: 'OWNER', admin: 'ADMIN', collaborator: 'EDITOR' }[roleOf()];
+    const label = { owner: 'OWNER', admin: 'ADMIN', collaborator: 'HELPER' }[roleOf()];
     badge.textContent = label || '';
     badge.classList.toggle('hidden', !label);
   }
@@ -572,8 +608,8 @@ function subscribeSorei() {
   unsubscribeSorei();
   if (!currentUser) return;
   // An admin reads every member's; a member may read only their own branch.
-  const ref     = isAdmin() ? soreiSaishiRef : soreiSaishiRef.child(currentUser.uid);
-  const depth   = isAdmin() ? 2 : 1;
+  const ref     = canSorei() ? soreiSaishiRef : soreiSaishiRef.child(currentUser.uid);
+  const depth   = canSorei() ? 2 : 1;
   const handler = snap => {
     const val = snap.val() || {};
     const flat = depth === 2
@@ -594,7 +630,7 @@ function unsubscribeSorei() {
 // could read them, into the per-member node. Only an admin can do it, and only
 // once — after the move church/data carries none.
 async function migrateSoreiOutOfSharedData(legacy) {
-  if (!legacy.length || !isAdmin()) return;
+  if (!legacy.length || !isManager()) return;
   try {
     const existing = await soreiSaishiRef.once('value');
     const byOwner = existing.val() || {};
@@ -1669,7 +1705,7 @@ function openAccountsModal() {
         <div class="scheduled-msg-row" style="flex-direction:column;align-items:stretch;gap:6px">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
             <div class="scheduled-msg-info">
-              <div class="scheduled-msg-date">${esc(u.username)} &bull; <span style="text-transform:capitalize">${esc(u.role)}</span>
+              <div class="scheduled-msg-date">${esc(u.username)} &bull; <span>${esc(roleLabelFor(u))}</span>
                 ${u.profileComplete ? ' &bull; <span style="color:#15803d">&#10003; Profile set</span>' : ' &bull; <span style="color:#c2410c">Profile pending</span>'}
               </div>
               <div class="scheduled-msg-preview">${esc(u.displayName || u.username)}</div>
@@ -1701,8 +1737,8 @@ function openAccountsModal() {
     <div class="form-group"><label class="form-label">Role</label>
       <select class="form-input" id="new-acct-role">
         <option value="member">Member</option>
-        ${isOwner() ? `<option value="collaborator">Collaborator</option>
-        <option value="admin">Administrator</option>` : ''}
+        ${isOwner() ? HELPERS.map(h => `<option value="helper:${h.id}">${esc(h.label)}</option>`).join('')
+          + '<option value="admin">Administrator</option>' : ''}
       </select></div>
     <button class="form-btn form-btn-primary" id="add-acct-btn">+ Create Account</button>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px">The member signs in with their email and this password, then changes it in Settings.</p>
@@ -1782,7 +1818,10 @@ function openAccountsModal() {
       const email       = document.getElementById('new-acct-email').value.trim().toLowerCase();
       const displayName = document.getElementById('new-acct-display').value.trim();
       const password    = document.getElementById('new-acct-pw').value;
-      const role        = document.getElementById('new-acct-role').value;
+      const picked      = document.getElementById('new-acct-role').value;
+      const helper      = picked.startsWith('helper:')
+        ? HELPERS.find(h => 'helper:' + h.id === picked) : null;
+      const role        = helper ? 'collaborator' : picked;
       if (!email || !password) { showToast('Email and password are required.', 'error'); return; }
       if (password.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
 
@@ -1796,6 +1835,7 @@ function openAccountsModal() {
           username:        email.split('@')[0],
           displayName:     displayName || email.split('@')[0],
           role,
+          ...(helper ? { perms: helper.perms } : {}),
           profileComplete: false
         });
         await loadProfiles();
@@ -1835,66 +1875,67 @@ async function createAuthUserAsAdmin(email, password) {
   }
 }
 
-const ROLE_LABELS = {
-  owner:        'Owner — everything, including assigning roles',
-  admin:        'Administrator — everything except roles',
-  collaborator: 'Collaborator — only the areas ticked below',
-  member:       'Member',
-  pending:      'Pending — waiting for approval'
-};
-
 function countOwners() {
   return Object.values(profilesByUid || {}).filter(p => p && p.role === 'owner').length;
 }
 
-// Only an owner sees this, and never for their own account: nobody may change
-// their own role, which is what stops the last owner locking the church out.
+// One dropdown, one job each. Only an owner sees it, and never for their own
+// account: nobody may change their own role, which is what stops the last
+// owner locking the church out.
 function roleEditor(u) {
-  if (!isOwner()) {
-    return `<div class="form-group"><label class="form-label">Role</label>
-      <input class="form-input" value="${esc(ROLE_LABELS[u.role] || 'Member')}" disabled style="opacity:.55" />
-      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Only an owner can change roles.</p></div>`;
-  }
-  if (u.uid === currentUser.uid) {
-    return `<div class="form-group"><label class="form-label">Role</label>
-      <input class="form-input" value="${esc(ROLE_LABELS[u.role] || '')}" disabled style="opacity:.55" />
-      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">This is you. Another owner would have to change your role.</p></div>`;
-  }
-  if (u.role === 'owner') {
-    return `<div class="form-group"><label class="form-label">Role</label>
-      <input class="form-input" value="${esc(ROLE_LABELS.owner)}" disabled style="opacity:.55" />
-      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">An owner's account can only be changed by themselves.</p></div>`;
-  }
-  const opts = ROLES.filter(r => r !== 'pending' || u.role === 'pending')
-    .map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${esc(ROLE_LABELS[r])}</option>`).join('');
-  const perms = (u.perms || {});
+  const note = msg => `<div class="form-group"><label class="form-label">Role</label>
+      <input class="form-input" value="${esc(roleLabelFor(u))}" disabled style="opacity:.55" />
+      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${msg}</p></div>`;
+
+  if (!isOwner())                 return note('Only an owner can change roles.');
+  if (u.uid === currentUser.uid)  return note('This is you. Another owner would have to change your role.');
+  if (u.role === 'owner')         return note('An owner\u2019s account can only be changed by themselves.');
+
+  const current = u.role === 'collaborator' ? ('helper:' + (helperIdOf(u.perms) || '')) : u.role;
+  const opt = (value, label) => `<option value="${value}" ${current === value ? 'selected' : ''}>${esc(label)}</option>`;
   return `
     <div class="form-group"><label class="form-label">Role</label>
-      <select class="form-input" id="ea-role">${opts}</select></div>
-    <div class="form-group" id="ea-perms" style="${u.role === 'collaborator' ? '' : 'display:none'}">
-      <label class="form-label">What they can edit</label>
-      ${PERMS.map(p => `
-        <label class="booking-check"><input type="checkbox" class="ea-perm" data-perm="${p.key}" ${perms[p.key] ? 'checked' : ''} />
-          <span>${esc(p.label)}</span></label>`).join('')}
-      <p style="font-size:11px;color:var(--text-muted);margin-top:6px">
-        Collaborators never see prayer requests, Sorei-Saishi records, meeting bookings or members' contact details.
-      </p>
+      <select class="form-input" id="ea-role">
+        ${opt('member', 'Member')}
+        ${HELPERS.map(h => opt('helper:' + h.id, h.label)).join('')}
+        ${opt('admin', 'Administrator')}
+        ${opt('owner', 'Owner')}
+        ${u.role === 'pending' ? opt('pending', 'Pending approval') : ''}
+      </select>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5" id="ea-role-blurb"></p>
     </div>`;
 }
 
-function bindRoleEditor(u) {
+const ROLE_BLURBS = {
+  member:  'Sees the app like everyone else. Cannot change anything.',
+  admin:   'Everything you can do, except assigning roles or changing an owner\u2019s account.',
+  owner:   'Everything, including assigning roles. There can be two.',
+  pending: 'Waiting to be let in. Sees nothing yet.'
+};
+
+function bindRoleEditor() {
   const sel = document.getElementById('ea-role');
-  if (!sel) return;
-  sel.addEventListener('change', () => {
-    const box = document.getElementById('ea-perms');
-    if (box) box.style.display = sel.value === 'collaborator' ? '' : 'none';
-  });
+  const out = document.getElementById('ea-role-blurb');
+  if (!sel || !out) return;
+  const show = () => {
+    const v = sel.value;
+    const h = v.startsWith('helper:') ? HELPERS.find(x => 'helper:' + x.id === v) : null;
+    out.textContent = h ? h.blurb : (ROLE_BLURBS[v] || '');
+  };
+  sel.addEventListener('change', show);
+  show();
 }
 
-function readPerms() {
-  const out = {};
-  document.querySelectorAll('.ea-perm').forEach(el => { if (el.checked) out[el.dataset.perm] = true; });
-  return Object.keys(out).length ? out : null;
+// Turn the dropdown choice into what actually gets stored.
+function chosenRole() {
+  const sel = document.getElementById('ea-role');
+  if (!sel) return null;
+  const v = sel.value;
+  if (v.startsWith('helper:')) {
+    const h = HELPERS.find(x => 'helper:' + x.id === v);
+    return h ? { role: 'collaborator', perms: h.perms } : null;
+  }
+  return { role: v, perms: null };
 }
 
 function openEditAccountModal(username) {
@@ -1931,20 +1972,19 @@ function openEditAccountModal(username) {
         btn.disabled = false;
       }
     });
-    bindRoleEditor(u);
+    bindRoleEditor();
     document.getElementById('ea-save').addEventListener('click', async () => {
       const displayName = document.getElementById('ea-display').value.trim();
       if (!u.uid) { showToast('That account has no linked sign-in record.', 'error'); return; }
       const patch = { displayName: displayName || username };
-      const roleEl = document.getElementById('ea-role');
-      if (roleEl && isOwner() && u.uid !== currentUser.uid) {
-        const role = roleEl.value;
-        if (role === 'owner' && u.role !== 'owner' && countOwners() >= MAX_OWNERS) {
+      const chosen = isOwner() && u.uid !== currentUser.uid ? chosenRole() : null;
+      if (chosen) {
+        if (chosen.role === 'owner' && u.role !== 'owner' && countOwners() >= MAX_OWNERS) {
           showToast(`There can be at most ${MAX_OWNERS} owners. Step one down first.`, 'error');
           return;
         }
-        patch.role = role;
-        patch.perms = role === 'collaborator' ? readPerms() : null;
+        patch.role  = chosen.role;
+        patch.perms = chosen.perms;
       }
       try {
         await usersRef.child(u.uid).update(patch);
@@ -3569,7 +3609,7 @@ function renderSoreiSaishi(filter) {
   if (!list) return;
 
   const entries = appData.soreiSaishi || [];
-  const isAdm = isAdmin();
+  const isAdm = canSorei();
 
   // Members see only their own enrollment
   const visible = isAdm
