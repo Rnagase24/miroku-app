@@ -4043,12 +4043,12 @@ function closePrintSheet() {
 
 document.getElementById('print-close-btn').addEventListener('click', closePrintSheet);
 document.getElementById('print-go-btn').addEventListener('click', () => {
-  // Give the logo a moment if it is still loading, so it is never missing from
-  // the printed page.
-  const img = document.querySelector('#print-sheet img');
-  const go  = () => window.print();
-  if (!img || img.complete) go();
-  else { img.onload = go; img.onerror = go; setTimeout(go, 1500); }
+  // Print inside the tap that asked for it. Waiting for anything first — the
+  // logo, a timer — puts the call outside the gesture, and Safari then treats
+  // it as the page printing by itself and interrupts with a permission prompt.
+  // Nothing needs waiting for: the sheet, logo included, has been on screen
+  // since it opened.
+  window.print();
 });
 
 // The church's letterhead, shared by every printed sheet.
