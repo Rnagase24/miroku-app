@@ -315,8 +315,20 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   // 3. One-on-one meetings — 24h and 1h before an approved meeting. These go to
   //    named recipients (the member plus every minister), not the whole list.
+  // Everyone who runs the church. This filtered on role === 'admin' alone,
+  // which was correct until roles were introduced — at which point the church's
+  // own minister became 'owner' and quietly dropped off the list. Prayer
+  // requests, ancestor requests, meeting requests and cancellations were all
+  // addressed to a set that no longer included the one person who needed them.
   const adminUids = Object.entries(users)
-    .filter(([, p]) => p && p.role === 'admin')
+    .filter(([, p]) => p && (p.role === 'owner' || p.role === 'admin'))
+    .map(([uid]) => uid);
+
+  // A helper given the Sorei-Saishi job is told about ancestor service requests
+  // as well — that is what the job is.
+  const soreiUids = Object.entries(users)
+    .filter(([, p]) => p && (p.role === 'owner' || p.role === 'admin'
+      || (p.role === 'collaborator' && p.perms && p.perms.sorei === true)))
     .map(([uid]) => uid);
 
   const whenLabel = a => new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`)
@@ -497,7 +509,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     for (const [id, r] of Object.entries(soreis)) {
       if (!r || !recentEnough(r.submittedAt)) continue;
       jobs.push({
-        key: `sorei-${id}`, pref: 'sorei', to: adminUids,
+        key: `sorei-${id}`, pref: 'sorei', to: soreiUids,
         title: 'New ancestor service request',
         body: `${r.memberName || 'A member'} requested ${r.serviceLabel || 'a service'}`
             + (r.ancestorName ? ` for ${r.ancestorName}` : '')
