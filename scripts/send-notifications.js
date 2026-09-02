@@ -331,6 +331,39 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
       || (p.role === 'collaborator' && p.perms && p.perms.sorei === true)))
     .map(([uid]) => uid);
 
+  // A notification addressed to the ministers that can reach nobody is the
+  // failure that hides best: in the log it looks exactly like having nothing to
+  // send. It stayed true for a week — the minister's role changed and this
+  // sender was still looking for the old one — and the only sign was that
+  // nothing arrived. Say it out loud, every run.
+  const canReceive = (uid, pref) => !!subs[uid] && prefsFor(uid)[pref] === true;
+
+  const responsible = [...new Set([...adminUids, ...soreiUids])];
+  console.log('— who receives requests from members —');
+  if (!responsible.length) {
+    console.log('  !! NOBODY holds a minister role. Every request will arrive in the');
+    console.log('     app and notify no one.');
+  }
+  for (const uid of responsible) {
+    const p = prefsFor(uid);
+    console.log(`  ${mask(uid)} role=${(users[uid] || {}).role || '?'}`
+      + ` subscribed=${subs[uid] ? 'yes' : 'NO'}`
+      + ` prayer=${p.prayer === true} sorei=${p.sorei === true} oneonone=${p.oneonone === true}`);
+  }
+  for (const [pref, who, what] of [
+    ['prayer',   adminUids, 'prayer requests'],
+    ['sorei',    soreiUids, 'ancestor service requests'],
+    ['oneonone', adminUids, 'meeting and Johrei requests']
+  ]) {
+    const reachable = who.filter(uid => canReceive(uid, pref));
+    if (!reachable.length) {
+      console.log(`  !! NOBODY can be notified about ${what}.`);
+      console.log(`     ${who.length} account(s) hold that responsibility; none is both`);
+      console.log(`     subscribed on a device and switched on for '${pref}'.`);
+      console.log(`     Members will submit them and no one will be told.`);
+    }
+  }
+
   const whenLabel = a => new Date(`${a.date}T${a.time}:00${tzOffset(a.date)}`)
     .toLocaleString('en-US', { timeZone: CHURCH_TZ, weekday: 'short', month: 'short',
                                day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -548,6 +581,16 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const anyPending = j => Object.keys(subs).some(uid =>
     (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true && !deliveredTo(j.key, uid));
   const due = jobs.filter(anyPending);
+
+  // Something ready to go that nobody can receive, and nobody ever has. Not the
+  // same as "already delivered" — and until now the two were indistinguishable
+  // from the log.
+  const stranded = jobs.filter(j =>
+    !sentLog[j.key] &&
+    !Object.keys(subs).some(uid => (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true));
+  for (const j of stranded) {
+    console.log(`  !! ${j.key} has no one to go to — "${j.title}"`);
+  }
   if (!due.length) {
     // Distinguish "nothing is scheduled for now" from "it went out already" —
     // reading the first as the second sends you hunting for a bug that is not there.
