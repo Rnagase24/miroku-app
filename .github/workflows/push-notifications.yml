@@ -14,9 +14,15 @@ name: Send push notifications
 # that.
 #
 # So a run no longer tries to be a single instant. It stays alive and checks
-# every minute for just under six hours, which is GitHub's per-job limit. The
-# schedule's only remaining job is to start a fresh one when the last expires,
-# and it fires far more often than that. Coverage is continuous.
+# every minute. A single job may last six hours at most, so one trigger starts
+# four shifts back to back — a little under twenty-three hours of watching from
+# one start.
+#
+# That margin is the point. A watcher lasting under six hours would still have
+# been a gamble: the longest gap measured between scheduled runs was seven
+# hours, so a watcher could expire before anything arrived to replace it. At
+# twenty-three hours the schedule can stay silent for the best part of a day
+# and coverage still holds.
 on:
   schedule:
     # Kept frequent on purpose: this is now "start a watcher if one is not
@@ -36,6 +42,13 @@ concurrency:
 jobs:
   send:
     runs-on: ubuntu-latest
+    strategy:
+      # One shift at a time, each picking up as the last ends. Four of them
+      # cover close to a full day from a single trigger.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        shift: [1, 2, 3, 4]
     # Just under GitHub's six-hour ceiling for a job.
     timeout-minutes: 355
     steps:
@@ -65,7 +78,7 @@ jobs:
           # picture: who is subscribed, what is switched on, whether anyone can
           # actually be reached. After that it stays quiet unless a cycle sends
           # something or finds something wrong.
-          echo "── first check, in full ──"
+          echo "── shift ${{ matrix.shift }} of 4 · first check, in full ──"
           node scripts/send-notifications.js || echo "!! first check failed — carrying on"
 
           while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -80,4 +93,4 @@ jobs:
             fi
           done
 
-          echo "── watch finished after $cycle checks; the schedule starts the next one ──"
+          echo "── shift ${{ matrix.shift }} finished after $cycle checks ──"
