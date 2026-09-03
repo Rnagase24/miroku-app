@@ -121,6 +121,10 @@
       "hasOwner": {
         ".read": "auth != null",
         ".write": "auth != null && !data.exists() && root.child('church/users').child(auth.uid).child('role').val() === 'owner'"
+      },
+      "pushLog": {
+        ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && root.child('church/users').child(auth.uid).child('role').val() !== 'member'",
+        ".write": "false"
       }
     }
   }

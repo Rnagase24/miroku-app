@@ -30,6 +30,10 @@ const soreiSaishiRef    = db.ref('church/soreiSaishi');
 // key and spend its quota. Only the admin's browser calls YouTube now; the
 // resulting video list is published into church/data for everyone else.
 const privateRef        = db.ref('church/private');
+// What the sender actually delivered. Written only by the sender; the app reads
+// it so that whoever posted something can see whether it reached anyone,
+// instead of switching a toggle and hoping.
+const pushLogRef        = db.ref('church/pushLog');
 const pushSubsRef       = db.ref('church/pushSubs');
 // Appointments are nested per member so a member can read their own without
 // being able to read anyone else's.
@@ -1517,10 +1521,16 @@ function openAnnouncementModal() {
       // The minister should see their own announcement too, not have it
       // silently marked as read on the device that wrote it.
       saveSection('announcement');
-      closeModal();
-      showToast(appData.announcement.active
-        ? 'Posted. Members will see it next time they open the app.'
-        : 'Saved, but not showing — switch "Show to members" on to post it.', 'info');
+      const posted = appData.announcement;
+      if (posted.active) {
+        showToast('Posted. Notifying members…', 'info');
+        // Keep the dialog open just long enough to report the delivery.
+        const note = document.getElementById('ann-msg');
+        if (note) { note.className = 'settings-msg'; watchDelivery(`announce-${posted.id}`, note); }
+      } else {
+        closeModal();
+        showToast('Saved, but not showing — switch "Show to members" on to post it.', 'info');
+      }
     });
 
     document.getElementById('ann-clear-btn').addEventListener('click', () => {
@@ -2072,6 +2082,64 @@ function openSigninLogModal() {
   });
 }
 
+// ── Delivery confirmation ──
+// Watch for the sender's record of one notification and report it in plain
+// words. Stops after a few minutes: if nothing has arrived by then, something
+// is wrong and saying so is more use than a spinner that never resolves.
+const deliveryWatchers = [];
+
+function watchDelivery(key, el, { waitFor = 240 } = {}) {
+  if (!el) return;
+  el.textContent = 'Notifying members…';
+  el.style.color = 'var(--text-muted)';
+
+  const ref = pushLogRef.child(key);
+  const started = Date.now();
+  let done = false;
+  // Declared up here on purpose: a read that is refused calls finish() before
+  // the interval below has been created.
+  let timer = null;
+
+  const finish = () => {
+    if (done) return;
+    done = true;
+    ref.off('value', handler);
+    if (timer) clearInterval(timer);
+  };
+
+  const handler = snap => {
+    const entry = snap.val();
+    if (!entry || !entry.to) return;
+    const n = Object.values(entry.to).filter(Boolean).length;
+    if (!n) return;
+    const at = new Date(entry.sentAt);
+    el.textContent = `✓ ${n} ${n === 1 ? 'person was' : 'people were'} notified`
+      + (isNaN(at) ? '' : ' at ' + at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    el.style.color = '#15803d';
+    finish();
+  };
+
+  ref.on('value', handler, err => {
+    console.error('Delivery check failed:', err);
+    el.textContent = 'Posted. (Could not check delivery from this account.)';
+    finish();
+  });
+
+  timer = setInterval(() => {
+    if (Date.now() - started < waitFor * 1000) return;
+    el.textContent = 'Posted, but nobody has been notified yet. '
+                   + 'Check that members have this notification switched on.';
+    el.style.color = '#b06a00';
+    finish();
+  }, 3000);
+
+  deliveryWatchers.push(finish);
+}
+
+function stopDeliveryWatchers() {
+  while (deliveryWatchers.length) deliveryWatchers.pop()();
+}
+
 // ── LIVE EVENTS ──
 const PLATFORMS = [
   { key: 'facebook', icon: '📘', label: 'Facebook Live' },
@@ -2121,13 +2189,14 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
           <label class="form-label">URL</label>
           <input class="form-input" id="live-url-${p.key}" type="url" value="${esc(d.url || '')}" placeholder="https://..." />
         </div>
-        <div class="settings-toggle-row" style="margin-bottom:20px">
+        <div class="settings-toggle-row" style="margin-bottom:6px">
           <div class="toggle-info"><div class="toggle-title">Show as Live</div></div>
           <label class="toggle-switch">
             <input type="checkbox" id="live-active-${p.key}" ${d.active ? 'checked' : ''} />
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <p class="delivery-note" id="live-sent-${p.key}" style="margin-bottom:20px"></p>
       `;
     }).join('')}
     <button class="form-btn form-btn-primary" id="save-live-btn">Save</button>
@@ -2171,9 +2240,15 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
       if (!box) return;
       box.addEventListener('change', () => {
         applyAll();
-        showToast(box.checked
-          ? `${p.label} is live — members are being notified.`
-          : `${p.label} is no longer showing as live.`, 'info');
+        const note = document.getElementById('live-sent-' + p.key);
+        if (box.checked) {
+          const stamp = Date.parse((appData.liveEvents[p.key] || {}).activatedAt || '');
+          showToast(`${p.label} is live — notifying members.`, 'info');
+          if (!isNaN(stamp)) watchDelivery(`live-${p.key}-${stamp}`, note);
+        } else {
+          if (note) note.textContent = '';
+          showToast(`${p.label} is no longer showing as live.`, 'info');
+        }
       });
     });
 
@@ -4752,6 +4827,7 @@ function openModal(title, bodyHtml, onReady) {
 }
 
 function closeModal() {
+  stopDeliveryWatchers();
   modalToken++;
   document.getElementById('modal-overlay').classList.add('hidden');
   // Emptied, not just hidden: every id inside a closed modal stayed findable by

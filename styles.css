@@ -1941,3 +1941,11 @@ body:not(.is-owner) .owner-only { display: none; }
   .print-sheet footer { margin-top: 24px; break-inside: avoid; page-break-inside: avoid; }
   .print-sheet header, .print-sheet h1 { break-after: avoid; page-break-after: avoid; }
 }
+
+/* Delivery confirmation under a switch that sends something. */
+.delivery-note {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  min-height: 1em;
+}
