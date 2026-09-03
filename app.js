@@ -2140,6 +2140,28 @@ function stopDeliveryWatchers() {
   while (deliveryWatchers.length) deliveryWatchers.pop()();
 }
 
+// Report on something already sent, when the dialog is opened again later.
+// Watching only from the moment a switch is flipped was no use in practice:
+// you turn the stream on and immediately close the dialog to go and run the
+// service, which stopped the watch and left nothing to come back to.
+function showExistingDelivery(key, el, activatedAt) {
+  if (!el) return;
+  const age = Date.now() - Date.parse(activatedAt || '');
+  pushLogRef.child(key).once('value').then(snap => {
+    const entry = snap.val();
+    const n = entry && entry.to ? Object.values(entry.to).filter(Boolean).length : 0;
+    if (n) {
+      const at = new Date(entry.sentAt);
+      el.textContent = `✓ ${n} ${n === 1 ? 'person was' : 'people were'} notified`
+        + (isNaN(at) ? '' : ' at ' + at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+      el.style.color = '#15803d';
+      return;
+    }
+    // Nothing recorded. Still worth waiting on if it only just went on.
+    if (!isNaN(age) && age < 10 * 60000) watchDelivery(key, el);
+  }).catch(() => {});
+}
+
 // ── LIVE EVENTS ──
 const PLATFORMS = [
   { key: 'facebook', icon: '📘', label: 'Facebook Live' },
@@ -2228,6 +2250,15 @@ document.getElementById('edit-live-btn').addEventListener('click', () => {
       PLATFORMS.forEach(p => { appData.liveEvents[p.key] = collect(p); });
       saveSection('liveEvents');
     };
+
+    // Anything already live gets its delivery reported straight away.
+    PLATFORMS.forEach(p => {
+      const d = (appData.liveEvents || {})[p.key] || {};
+      if (!d.active || !d.activatedAt) return;
+      const stamp = Date.parse(d.activatedAt);
+      if (isNaN(stamp)) return;
+      showExistingDelivery(`live-${p.key}-${stamp}`, document.getElementById('live-sent-' + p.key), d.activatedAt);
+    });
 
     // Switching a platform takes effect immediately. It used to do nothing at
     // all until Save was pressed — but this reads like the notification
