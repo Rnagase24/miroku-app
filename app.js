@@ -34,6 +34,9 @@ const privateRef        = db.ref('church/private');
 // it so that whoever posted something can see whether it reached anyone,
 // instead of switching a toggle and hoping.
 const pushLogRef        = db.ref('church/pushLog');
+// Who changed what, and when. Append-only: an entry cannot be altered or
+// removed once written, including by whoever wrote it.
+const activityRef       = db.ref('church/activityLog');
 const pushSubsRef       = db.ref('church/pushSubs');
 // Appointments are nested per member so a member can read their own without
 // being able to read anyone else's.
@@ -599,6 +602,7 @@ function saveSorei() {
     if (!e || e.id == null) continue;
     (byOwner[soreiOwner(e)] ||= {})[e.id] = e;
   }
+  logActivity('Edited Sorei-Saishi records');
   renderAll();
   return soreiSaishiRef.set(byOwner).catch(err => {
     console.error('Enrolment save error:', err);
@@ -668,6 +672,8 @@ const STARTER_LISTS = ['services', 'prayerForms', 'johreiSessions'];
 // to post the Daily Inspiration would have been writing all of it — and it
 // silently overwrote anything another editor had changed in the meantime.
 function saveSection(...keys) {
+  const named = [...new Set(keys.map(k => SECTION_NAMES[k]).filter(Boolean))];
+  if (named.length) logActivity('Edited ' + named.join(' and '));
   appData.emptiedLists = STARTER_LISTS.filter(k => Array.isArray(appData[k]) && !appData[k].length);
   renderAll();
   const patch = { emptiedLists: appData.emptiedLists };
@@ -1146,6 +1152,11 @@ function showApp(visible) {
     if (schedBtn) {
       schedBtn.replaceWith(schedBtn.cloneNode(true));
       document.getElementById('schedule-word-btn').addEventListener('click', openScheduleModal);
+    }
+    const actBtn = document.getElementById('activity-log-btn');
+    if (actBtn) {
+      actBtn.replaceWith(actBtn.cloneNode(true));
+      document.getElementById('activity-log-btn').addEventListener('click', openActivityLogModal);
     }
     const acctBtn = document.getElementById('manage-accounts-btn');
     if (acctBtn) {
@@ -1794,6 +1805,7 @@ function openAccountsModal() {
         btn.disabled = true;
         try {
           await usersRef.child(u.uid).update({ role: 'member' });
+          logActivity('Approved a new member', u.displayName || u.username);
           await loadProfiles();
           showToast(`${u.displayName || u.username} can now use the app.`, 'info');
           openAccountsModal();
@@ -1848,6 +1860,7 @@ function openAccountsModal() {
           ...(helper ? { perms: helper.perms } : {}),
           profileComplete: false
         });
+        logActivity('Created an account', displayName || email);
         await loadProfiles();
         showToast(`Account created. Give them: ${email} / ${password}`, 'info');
         openAccountsModal();
@@ -1998,6 +2011,10 @@ function openEditAccountModal(username) {
       }
       try {
         await usersRef.child(u.uid).update(patch);
+        if (chosen) {
+          logActivity('Changed a role',
+            `${u.displayName || username} is now ${roleLabelFor({ role: chosen.role, perms: chosen.perms })}`);
+        }
         await loadProfiles();
         showToast('Account updated!', 'info');
         openAccountsModal();
@@ -2079,6 +2096,79 @@ function openSigninLogModal() {
   }).catch(() => {
     if (!modalStillOpen(tok)) return;
     document.getElementById('modal-body').innerHTML = '<p style="color:#c0392b;font-size:14px">Could not load sign-in log. Check database rules.</p>';
+  });
+}
+
+// ── Activity log ──
+// Which part of the church's information each saved section belongs to, in
+// words the minister would use. Anything not named here is not worth recording
+// — ytVideos, for one, is written by the automatic YouTube sync rather than by
+// a person.
+const SECTION_NAMES = {
+  messages:       'Daily Inspiration',
+  services:       'Service times',
+  johreiSessions: 'Johrei times',
+  liveEvents:     'Live streaming',
+  events:         'Events',
+  media:          'Media',
+  announcement:   'Announcement',
+  members:        'Member directory',
+  prayerForms:    'Prayer forms',
+  donations:      'Giving',
+  location:       'Location and contact',
+  contact:        'Location and contact',
+  soreiRules:     'Sorei-Saishi rules',
+  youtube:        'YouTube settings'
+};
+
+function logActivity(what, detail) {
+  if (!currentUser || !what) return;
+  // Never let recording an action interfere with the action itself.
+  activityRef.push({
+    at:   new Date().toISOString(),
+    uid:  currentUser.uid,
+    name: currentUser.displayName || currentUser.username || '',
+    what,
+    ...(detail ? { detail: String(detail).slice(0, 200) } : {})
+  }).catch(err => console.error('Could not record activity:', err));
+}
+
+function openActivityLogModal() {
+  openModal('Activity', '<p style="color:var(--text-muted);font-size:13px">Loading…</p>', () => {});
+  const tok = modalToken;
+  activityRef.orderByChild('at').limitToLast(100).once('value').then(snap => {
+    if (!modalStillOpen(tok)) return;
+    const rows = [];
+    snap.forEach(c => { rows.push(c.val()); });
+    rows.reverse();
+    if (!rows.length) {
+      document.getElementById('modal-body').innerHTML =
+        '<p style="color:var(--text-muted);font-size:14px;text-align:center;padding:24px 0">Nothing recorded yet.</p>';
+      return;
+    }
+    let lastDay = '';
+    let html = `<p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">The last ${rows.length} change${rows.length === 1 ? '' : 's'}, newest first.</p>`;
+    for (const r of rows) {
+      const d = new Date(r.at);
+      const day = isNaN(d) ? '' : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+      if (day !== lastDay) {
+        lastDay = day;
+        html += `<p style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.07em;margin:16px 0 6px">${esc(day)}</p>`;
+      }
+      html += `<div class="scheduled-msg-row" style="flex-direction:column;align-items:stretch;gap:2px">
+        <div style="display:flex;justify-content:space-between;gap:8px">
+          <span style="font-weight:600;font-size:14px">${esc(r.what)}</span>
+          <span style="font-size:12px;color:var(--text-muted);flex-shrink:0">${isNaN(d) ? '' : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted)">${esc(r.name || 'Someone')}${r.detail ? ' · ' + esc(r.detail) : ''}</div>
+      </div>`;
+    }
+    document.getElementById('modal-body').innerHTML = html;
+  }).catch(err => {
+    console.error('Activity log error:', err);
+    if (!modalStillOpen(tok)) return;
+    document.getElementById('modal-body').innerHTML =
+      '<p style="color:#c0392b;font-size:14px">Could not load the activity log.</p>';
   });
 }
 
@@ -2912,6 +3002,8 @@ function openMeetingRequestsModal() {
             await appointmentsRef.child(uid).child(id).update({
               status, decidedAt: new Date().toISOString(), decidedBy: currentUser.username
             });
+            const who = (all.find(x => x.uid === uid && x.id === id) || {}).memberName;
+            logActivity(status === 'approved' ? 'Approved a meeting' : 'Declined a meeting', who);
             showToast(note, 'info');
             openMeetingRequestsModal();
           } catch {

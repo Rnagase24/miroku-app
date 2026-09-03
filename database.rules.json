@@ -125,6 +125,13 @@
       "pushLog": {
         ".read": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && root.child('church/users').child(auth.uid).child('role').val() !== 'member'",
         ".write": "false"
+      },
+      "activityLog": {
+        ".read": "auth != null && (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin')",
+        "$entry": {
+          ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && !data.exists()",
+          ".validate": "newData.hasChildren(['at', 'uid', 'what']) && newData.child('uid').val() === auth.uid"
+        }
       }
     }
   }

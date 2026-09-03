@@ -660,6 +660,21 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     console.log(`Removed dead subscription for ${mask(uid)}`);  // public log — never raw
   }
 
+  // The activity log is kept the same way, oldest first.
+  try {
+    const actSnap = await db.ref('church/activityLog').once('value');
+    const act = actSnap.val() || {};
+    const actKeys = Object.keys(act);
+    if (actKeys.length > 500) {
+      const age = k => Date.parse((act[k] || {}).at || 0) || 0;
+      await Promise.all(actKeys.sort((a, b) => age(a) - age(b)).slice(0, actKeys.length - 300)
+        .map(k => db.ref('church/activityLog').child(k).remove()));
+      console.log(`Pruned the activity log to 300 entries.`);
+    }
+  } catch (err) {
+    console.error(`Could not prune the activity log (${err.message})`);
+  }
+
   // Keep the log from growing without bound.
   // Removing a pushLog entry licenses a re-send, so prune the OLDEST by time —
   // sorting by key name deleted every appt* record first and re-announced them.
