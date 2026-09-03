@@ -27,6 +27,23 @@ const webpush  = require('web-push');
 
 const CHURCH_TZ = 'America/Los_Angeles';
 
+// This runs in a loop for hours at a time (see the workflow), so a full
+// diagnostic every minute would bury the log. In quiet mode the output is held
+// and printed only when the cycle did something or found something wrong.
+const QUIET = process.env.QUIET === '1';
+if (QUIET) {
+  const real = console.log.bind(console);
+  const held = [];
+  let interesting = false;
+  console.log = (...a) => {
+    const line = a.map(String).join(' ');
+    if (line.includes('!!') || /: sent [1-9]/.test(line)) interesting = true;
+    held.push(line);
+  };
+  console.error = (...a) => { interesting = true; held.push(a.map(String).join(' ')); };
+  process.on('exit', () => { if (interesting) held.forEach(l => real(l)); });
+}
+
 // Every preference this sender acts on. Must match NOTIF_KEYS in app.js.
 const PREF_KEYS = ['dailyword', 'announcements', 'services', 'oneonone', 'events', 'live', 'prayer', 'sorei'];
 
