@@ -84,7 +84,9 @@
         "$uid": {
           ".read": "auth != null && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
           ".write": "auth != null && root.child('church/users').child(auth.uid).child('role').val() !== 'pending' && ($uid === auth.uid || (root.child('church/users').child(auth.uid).child('role').val() === 'owner' || root.child('church/users').child(auth.uid).child('role').val() === 'admin'))",
-          ".validate": "!newData.exists() || (newData.hasChildren(['endpoint', 'p256dh', 'auth']) && $uid === auth.uid)"
+          "$device": {
+            ".validate": "!newData.exists() || (newData.hasChildren(['endpoint', 'p256dh', 'auth']) && $uid === auth.uid)"
+          }
         }
       },
       "appointments": {

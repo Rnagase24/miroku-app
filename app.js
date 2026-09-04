@@ -38,6 +38,47 @@ const pushLogRef        = db.ref('church/pushLog');
 // removed once written, including by whoever wrote it.
 const activityRef       = db.ref('church/activityLog');
 const pushSubsRef       = db.ref('church/pushSubs');
+
+// A push subscription belongs to a device, not to a person. Stored one per
+// account, signing in on a second phone overwrote the first and it went silent
+// — which is why the minister with two phones only ever heard one of them.
+// Each device keeps its own id so each keeps its own subscription.
+const DEVICE_KEY = 'miroku_device_id';
+function deviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    // Private browsing with storage blocked: fall back to something stable for
+    // this page's lifetime, so at least the current session works.
+    window.__deviceId = window.__deviceId
+      || 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    return window.__deviceId;
+  }
+}
+
+// Records written before subscriptions were per device sit directly under the
+// account, with endpoint alongside p256dh and auth. Move such a record to a
+// device of its own rather than discarding it, or the phone it belongs to goes
+// quiet until somebody happens to open the app on it.
+async function migrateLegacySubscription(uid) {
+  try {
+    const snap = await pushSubsRef.child(uid).once('value');
+    const val = snap.val();
+    if (!val || typeof val.endpoint !== 'string') return;
+    await pushSubsRef.child(uid).update({
+      legacy: { uid, endpoint: val.endpoint, p256dh: val.p256dh, auth: val.auth,
+                updatedAt: val.updatedAt || new Date().toISOString() },
+      endpoint: null, p256dh: null, auth: null, uid: null, updatedAt: null
+    });
+  } catch (err) {
+    console.error('Could not move the old subscription record:', err);
+  }
+}
 // Appointments are nested per member so a member can read their own without
 // being able to read anyone else's.
 const appointmentsRef   = db.ref('church/appointments');
@@ -360,8 +401,10 @@ async function logout() {
   // account: leaving it filed under the departing member means that on a shared
   // phone the next person to sign in receives their notifications — prayer
   // requests included. Signing back in re-creates it.
+  // This device only — signing out on a phone must not silence the member's
+  // other one.
   if (currentUser) {
-    await pushSubsRef.child(currentUser.uid).remove().catch(() => {});
+    await pushSubsRef.child(currentUser.uid).child(deviceId()).remove().catch(() => {});
   }
   if ('credentials' in navigator) {
     navigator.credentials.preventSilentAccess().catch(() => {});
@@ -4716,7 +4759,8 @@ async function ensurePushSubscription() {
     }
 
     const json = sub.toJSON();
-    await pushSubsRef.child(currentUser.uid).set({
+    await migrateLegacySubscription(currentUser.uid);
+    await pushSubsRef.child(currentUser.uid).child(deviceId()).set({
       uid:       currentUser.uid,
       endpoint:  json.endpoint,
       p256dh:    json.keys.p256dh,
@@ -4776,7 +4820,7 @@ async function removePushSubscription() {
     const sub = await reg.pushManager.getSubscription();
     if (sub) await sub.unsubscribe();
   } catch {}
-  await pushSubsRef.child(currentUser.uid).remove().catch(() => {});
+  await pushSubsRef.child(currentUser.uid).child(deviceId()).remove().catch(() => {});
 }
 
 // Any preference still on? If not, drop the subscription entirely.
@@ -4875,7 +4919,7 @@ async function renderNotifStatus() {
     // cannot be read, the browser subscription is still the thing that matters,
     // so say so plainly rather than showing the member a database error.
     try {
-      const saved = await pushSubsRef.child(currentUser.uid).once('value');
+      const saved = await pushSubsRef.child(currentUser.uid).child(deviceId()).once('value');
       if (!saved.exists()) {
         return bad('<strong>Almost there.</strong> This phone is registered but not saved to the church database — switch a notification off and on again.');
       }

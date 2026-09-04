@@ -126,7 +126,27 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     db.ref('church/soreiRequests').once('value')
   ]);
 
-  const subs     = subsSnap.val()     || {};
+  const rawSubs  = subsSnap.val()     || {};
+  // One record per device now. A record written before that change sits
+  // directly under the account; treat it as a single device called 'legacy' so
+  // a phone that has not opened the app since keeps receiving.
+  const devicesOf = entry => {
+    if (!entry || typeof entry !== 'object') return {};
+    const out = {};
+    // Both shapes can be present at once, while one phone has updated and
+    // another has not. Returning early on the old one left the updated phone
+    // receiving nothing.
+    if (typeof entry.endpoint === 'string') out.legacy = entry;
+    for (const [dev, sub] of Object.entries(entry)) {
+      if (sub && typeof sub === 'object' && typeof sub.endpoint === 'string') out[dev] = sub;
+    }
+    return out;
+  };
+  const subs = {};                       // uid -> { deviceId: subscription }
+  for (const [uid, entry] of Object.entries(rawSubs)) {
+    const d = devicesOf(entry);
+    if (Object.keys(d).length) subs[uid] = d;
+  }
   const data     = dataSnap.val()     || {};
   const settings = settingsSnap.val() || {};
   const sentLog  = logSnap.val()      || {};
@@ -200,7 +220,8 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
                  has((profile.email || '').split('@')[0]) && 'email-prefix']
                 .filter(Boolean).join('+') || 'NO PREFS ANYWHERE';
     const p = prefsFor(uid);
-    console.log(`  ${mask(uid)} role=${profile.role || '?'} settingsVia=${via} `
+    const n = Object.keys(subs[uid] || {}).length;
+    console.log(`  ${mask(uid)} role=${profile.role || '?'} devices=${n} settingsVia=${via} `
       + `on=[${Object.keys(p).filter(k => p[k] === true).join(',') || 'none'}]`);
   }
   console.log(`— settings entries: ${Object.keys(settings).length} —`);
@@ -364,7 +385,7 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   for (const uid of responsible) {
     const p = prefsFor(uid);
     console.log(`  ${mask(uid)} role=${(users[uid] || {}).role || '?'}`
-      + ` subscribed=${subs[uid] ? 'yes' : 'NO'}`
+      + ` devices=${Object.keys(subs[uid] || {}).length}`
       + ` prayer=${p.prayer === true} sorei=${p.sorei === true} oneonone=${p.oneonone === true}`);
   }
   for (const [pref, who, what] of [
@@ -494,10 +515,14 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // could never recover the notification.
   // Delivered is per recipient. Recording it per job meant that if the admin
   // succeeded and a member's push failed, the member never got another attempt.
-  const deliveredTo = (k, uid) => {
+  const deliveredTo = (k, uid, dev) => {
     const e = sentLog[k];
     if (!e || !e.to || typeof e.to !== 'object') return false;  // legacy entries: retry
-    return e.to[uid] === true;
+    const at = e.to[uid];
+    // Recorded before delivery was tracked per device: the member has had it,
+    // so do not send it to them again on the strength of a new device.
+    if (at === true) return true;
+    return !!(at && typeof at === 'object' && at[dev] === true);
   };
   // 3b. New events — announced to everyone. Only events carrying a recent
   //     createdAt qualify, so the existing list is never announced in bulk.
@@ -595,8 +620,9 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   // can never disagree about what a job is called.
   for (const j of jobs) j.key = String(j.key).replace(/[.#$[\]/]/g, '_');
 
-  const anyPending = j => Object.keys(subs).some(uid =>
-    (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true && !deliveredTo(j.key, uid));
+  const anyPending = j => Object.entries(subs).some(([uid, devices]) =>
+    (!j.to || j.to.includes(uid)) && prefsFor(uid)[j.pref] === true &&
+    Object.keys(devices).some(dev => !deliveredTo(j.key, uid, dev)));
   const due = jobs.filter(anyPending);
 
   // Something ready to go that nobody can receive, and nobody ever has. Not the
@@ -624,27 +650,34 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     try {
       let sent = 0, skipped = 0, already = 0;
       const reached = {};
-      for (const [uid, sub] of Object.entries(subs)) {
+      for (const [uid, devices] of Object.entries(subs)) {
         if (job.to && !job.to.includes(uid)) continue;      // targeted at specific people
         if (prefsFor(uid)[job.pref] !== true) { skipped++; continue; }
-        if (deliveredTo(job.key, uid)) { already++; continue; }
+        for (const [dev, sub] of Object.entries(devices)) {
+        if (deliveredTo(job.key, uid, dev)) { already++; continue; }
         try {
           await webpush.sendNotification(
             { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
             JSON.stringify({ title: job.title, body: job.body, tag: job.pref, url: './' })
           );
-          reached[uid] = true;
+          (reached[uid] ||= {})[dev] = true;
           sent++;
         } catch (err) {
-          // 404/410 mean the member uninstalled or revoked — drop the record.
-          if (err.statusCode === 404 || err.statusCode === 410) stale.push(uid);
+          // 404/410 mean that device uninstalled or revoked — drop that device,
+          // never the member's other ones.
+          if (err.statusCode === 404 || err.statusCode === 410) stale.push([uid, dev]);
           else console.error(`  ${mask(uid)}: ${err.statusCode || ''} ${err.message}`);
+        }
         }
       }
       if (sent) {
         const prev = (sentLog[job.key] && sentLog[job.key].to) || {};
+        const to = { ...prev };
+        for (const [uid, devs] of Object.entries(reached)) {
+          to[uid] = to[uid] === true ? true : { ...(to[uid] || {}), ...devs };
+        }
         await db.ref('church/pushLog').child(job.key)
-          .set({ sentAt: new Date().toISOString(), to: { ...prev, ...reached } });
+          .set({ sentAt: new Date().toISOString(), to });
       }
       console.log(`${job.key}: sent ${sent}`
         + (already ? `, ${already} already had it` : '')
@@ -655,9 +688,10 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     }
   }
 
-  for (const uid of [...new Set(stale)]) {
-    await db.ref('church/pushSubs').child(uid).remove();
-    console.log(`Removed dead subscription for ${mask(uid)}`);  // public log — never raw
+  for (const pair of [...new Set(stale.map(JSON.stringify))].map(JSON.parse)) {
+    const [uid, dev] = pair;
+    await db.ref('church/pushSubs').child(uid).child(dev).remove();
+    console.log(`Removed one dead device for ${mask(uid)}`);   // public log — never raw
   }
 
   // The activity log is kept the same way, oldest first.
