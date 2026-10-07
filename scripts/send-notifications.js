@@ -283,7 +283,11 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
     const rec  = sentLog[key];
     const went = rec && rec.to ? Object.keys(rec.to).length : 0;
     const hrs  = (Date.now() - dueMs) / 3600000;
-    const state = rec    ? `sent to ${went}`
+    const sentWhen = rec && rec.sentAt
+      ? new Date(rec.sentAt).toLocaleString('en-US', { timeZone: CHURCH_TZ,
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : '';
+    const state = rec    ? `sent to ${went}${sentWhen ? ' on ' + sentWhen : ''}`
                 : hrs < 0 ? `due in ${Math.round(-hrs)}h`
                 : hrs > 12 ? `MISSED — came due ${Math.round(hrs)}h ago, past the 12h window`
                 : 'due now';
