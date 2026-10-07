@@ -404,6 +404,19 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
   const canReceive = (uid, pref) => !!subs[uid] && prefsFor(uid)[pref] === true;
 
   const responsible = [...new Set([...adminUids, ...soreiUids])];
+  // Which helper holds which job. A helper can only edit what their job
+  // covers, and the app hides the rest — so "I asked them to do it and nothing
+  // happened" can simply mean they were never given that job and never saw the
+  // button. Without this the log could not say so.
+  const helpers = Object.entries(users).filter(([, p]) => p && p.role === 'collaborator');
+  if (helpers.length) {
+    console.log('— helpers and what each may edit —');
+    for (const [uid, p] of helpers) {
+      const on = Object.keys(p.perms || {}).filter(k => p.perms[k] === true);
+      console.log(`  ${mask(uid)} ${on.length ? on.join(', ') : 'NOTHING — this account cannot edit anything'}`);
+    }
+  }
+
   console.log('— who receives requests from members —');
   if (!responsible.length) {
     console.log('  !! NOBODY holds a minister role. Every request will arrive in the');
