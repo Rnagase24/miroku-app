@@ -263,6 +263,33 @@ const nthOfMonth = day => Math.floor((day - 1) / 7) + 1;
 
   console.log(`— prayer requests: ${Object.keys(prayers).length} · sorei requests: ${Object.keys(soreis).length} —`);
 
+  // Every scheduled Daily Inspiration and what became of it. "Someone
+  // scheduled some and nothing arrived" was not answerable from this log:
+  // it said only that nothing was due, which looks the same whether the
+  // messages were never saved, are still in the future, or came due while
+  // nothing was watching. No '!!' here on purpose — this prints every cycle,
+  // and a message that has missed its window stays missed, so flagging it
+  // would repeat for hours.
+  const scheduled = Array.isArray(data.messages) ? data.messages : Object.values(data.messages || {});
+  console.log(`— daily inspiration: ${scheduled.length} message(s) —`);
+  for (const m of scheduled) {
+    if (!m) continue;
+    const title = String(m.title || 'untitled').slice(0, 40);
+    if (!m.scheduledDate) { console.log(`  "${title}" — no date set, will never send`); continue; }
+    const when  = `${m.scheduledDate} ${m.scheduledTime || '00:00'}`;
+    const dueMs = Date.parse(`${m.scheduledDate}T${m.scheduledTime || '00:00'}:00${tzOffset(m.scheduledDate)}`);
+    if (isNaN(dueMs)) { console.log(`  ${when} "${title}" — date cannot be read, will never send`); continue; }
+    const key  = `dailyword-${m.scheduledDate}-${m.id}-${Number(m.updatedAt) || 0}`.replace(/[.#$[\]/]/g, '_');
+    const rec  = sentLog[key];
+    const went = rec && rec.to ? Object.keys(rec.to).length : 0;
+    const hrs  = (Date.now() - dueMs) / 3600000;
+    const state = rec    ? `sent to ${went}`
+                : hrs < 0 ? `due in ${Math.round(-hrs)}h`
+                : hrs > 12 ? `MISSED — came due ${Math.round(hrs)}h ago, past the 12h window`
+                : 'due now';
+    console.log(`  ${when} "${title}" — ${state}`);
+  }
+
   // "We went live and nobody was told" is otherwise impossible to diagnose from
   // here: whether the switch was on, and how long the stamp had been sitting
   // there, is the whole answer. Not personal data, so printed plainly.
